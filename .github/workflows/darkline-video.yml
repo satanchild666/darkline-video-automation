@@ -1,0 +1,39 @@
+name: Darkline Studio - daily AI promotional video
+on:
+  schedule:
+    - cron: '17 13 * * *'
+      timezone: 'Europe/Budapest'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: darkline-daily-video
+  cancel-in-progress: false
+jobs:
+  video:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Python and video dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-dejavu-core
+          python -m pip install --disable-pip-version-check 'Pillow>=11,<13' 'numpy>=1.26,<3'
+      - name: Generate, render and save to Buffer drafts
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DARKLINE_TEST_TOKEN: ${{ secrets.DARKLINE_TEST_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: python video/publish_automation.py
+      - name: Keep workflow active and note successful run
+        if: success()
+        run: |
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git config user.name 'github-actions[bot]'
+          git add last-run.json
+          if ! git diff --cached --quiet; then
+            git commit -m "Video generated for $(date -u +%Y-%m-%d)"
+            git push
+          fi
