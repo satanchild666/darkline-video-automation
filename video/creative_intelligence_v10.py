@@ -179,8 +179,9 @@ def background(p,s,t):
         for i in range(6):
             r=int(160+90*i+20*t);d.arc((540-r,970-r,540+r,970+r),int(185+q*13),int(335+q*13),fill=secondary,width=3)
     elif layout=="dashboard":
-        for x in range(60,1080,90):d.line((x,210,x,1530),fill=secondary,width=1)
-        for y in range(240,1550,90):d.line((72,y,1008,y),fill=secondary,width=1)
+        for x in range(10,1080,90):
+            x=int(x+q*19)%1080;d.line((x,210,x,1530),fill=secondary,width=2)
+        for y in range(240,1550,90):d.line((72,y,1008,y),fill=secondary,width=2)
     elif layout=="editorial-light":
         d.rectangle((0,230,int(190+35*math.sin(q)),1530),fill=secondary)
         d.line((72,220,1008,220),fill=accent,width=3)
@@ -236,13 +237,13 @@ def frame(key,p,s,t,a,records):
             src=v9.read_frame(name,t,DUR[s])
             v4.card(im,src,210-int(45*q),570,660+int(90*q),910)
         elif layout in ("dashboard","editorial-light"):
-            v4.card(im,a[k],72,610-int(35*e),936,850,False)
+            v4.card(im,a[k],80-int(8*q),610-int(45*q),920+int(16*q),850+int(60*q),False)
         elif layout=="editorial":
-            v4.card(im,a[k],100,600-int(30*e),880,890,False)
+            v4.card(im,a[k],100-int(24*q),600-int(40*q),880+int(48*q),890,False)
         else:v9.premium_phone(im,a[k+"_tex"],540+50*math.sin(t*1.7),1030,530,930,-24+42*q,5,9-15*q,t)
     else:
-        v4.card(im,a["admin"],72,565,936,690,False)
-        v4.card(im,a["admin_detail"],95,1270-int(18*e),890,220,False)
+        v4.card(im,a["admin"],92-int(20*q),575-int(20*q),896+int(40*q),680+int(35*q),False)
+        v4.card(im,a["admin_detail"],112-int(30*q),1280-int(18*q),856+int(60*q),220,False)
     # Subtitle is visible exactly during the synthesized phrase, not over UI.
     r=records[s];at=sum(DUR[:s])+t
     if r["start"]<=at<r["end"]:
