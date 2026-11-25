@@ -15,6 +15,9 @@ jobs:
           persist-credentials: false
       - name: Install preview dependencies
         run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-dejavu-core
+          ffmpeg -version | head -n 1
           python -m pip install -q Pillow numpy playwright
           python -m playwright install --with-deps chromium
       - name: Capture actual demo and render full HD preview
