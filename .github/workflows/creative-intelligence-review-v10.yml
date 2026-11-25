@@ -1,0 +1,80 @@
+name: Darkline V10 creative intelligence review
+on:
+  push:
+    branches: [dev/video-dedup-v1]
+    paths: ['.github/workflows/creative-intelligence-review-v10.yml','video/creative_intelligence_v10.py']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - key: auto
+            demo: autoszerviz.html
+          - key: menu
+            demo: vendeglatas-egyben.html
+          - key: crm
+            demo: ugyfelkezelo.html
+          - key: web
+            demo: uzleti-weboldal.html
+          - key: salon
+            demo: szalon.html
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install render and neural narration dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-dejavu-core
+          python -m pip install -q Pillow numpy playwright piper-tts
+          python -m playwright install --with-deps chromium
+      - name: Route creative, capture verified demo, render and test
+        env:
+          DEMO: ${{ matrix.demo }}
+        run: |
+          python -m py_compile video/creative_intelligence_v10.py
+          python video/creative_intelligence_v10.py --url "https://darkline-studio.web.app/demok/$DEMO?skin=dark"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: V10-${{ matrix.key }}
+          path: |
+            creative-preview-v10/${{ matrix.key }}/Darkline_V10_*.mp4
+            creative-preview-v10/${{ matrix.key }}/storyboard.jpg
+            creative-preview-v10/${{ matrix.key }}/scene-*.jpg
+            creative-preview-v10/${{ matrix.key }}/quality.json
+            creative-preview-v10/${{ matrix.key }}/plan.json
+            creative-preview-v10/${{ matrix.key }}/fingerprint.json
+            creative-preview-v10/${{ matrix.key }}/captions.srt
+            creative-preview-v10/${{ matrix.key }}/narration_timing.json
+            creative-preview-v10/${{ matrix.key }}/capture_report.json
+          retention-days: 14
+  batch-review:
+    if: always()
+    needs: review
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: V10-*
+          path: batch
+      - name: Verify diversity and per-variant gates
+        run: |
+          python -m pip install -q Pillow numpy playwright
+          python video/creative_intelligence_v10.py --aggregate batch
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: V10-BATCH-REVIEW
+          path: creative-preview-v10/batch_quality.json
+          retention-days: 14
