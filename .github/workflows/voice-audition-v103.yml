@@ -1,0 +1,44 @@
+name: Darkline V10.3 natural voice review
+on:
+  push:
+    branches: [dev/video-dedup-v1]
+    paths: ['.github/workflows/voice-audition-v103.yml','video/voice_audition_v103.py']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audition:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install official ONNX CPU model dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg libsndfile1
+          git clone --depth 1 https://github.com/OpenMOSS/MOSS-TTS-Nano.git "$RUNNER_TEMP/moss"
+          git -C "$RUNNER_TEMP/moss" rev-parse HEAD
+          python -m pip install -q torch==2.7.0 torchaudio==2.7.0 --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -q -r "$RUNNER_TEMP/moss/requirements.txt"
+          python -m pip install -q -e "$RUNNER_TEMP/moss"
+      - name: Generate full-context Hungarian voice samples
+        env:
+          MOSS_DIR: ${{ runner.temp }}/moss
+        run: |
+          python -m py_compile video/voice_audition_v103.py
+          python video/voice_audition_v103.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Darkline-V10.3-NATURAL-VOICE-REVIEW
+          path: |
+            voice-review-v103/*.mp3
+            voice-review-v103/*.wav
+            voice-review-v103/*.json
+            voice-review-v103/*.txt
+          retention-days: 14
