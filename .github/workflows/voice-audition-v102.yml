@@ -1,0 +1,37 @@
+name: Darkline V10.2 voice audition
+on:
+  push:
+    branches: [dev/video-dedup-v1]
+    paths: ['.github/workflows/voice-audition-v102.yml','video/voice_audition_v102.py']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audition:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install audio dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          python -m pip install -q numpy piper-tts supertonic
+      - name: Generate three Hungarian audition tracks
+        run: |
+          python -m py_compile video/voice_audition_v102.py
+          python video/voice_audition_v102.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Darkline-V10.2-VOICE-REVIEW
+          path: |
+            voice-review-v102/*.mp3
+            voice-review-v102/*.wav
+            voice-review-v102/voice_report.json
+          retention-days: 14
