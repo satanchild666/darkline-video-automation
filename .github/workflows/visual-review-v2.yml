@@ -1,0 +1,32 @@
+name: Darkline V2 visual review
+on:
+  push:
+    branches: [dev/video-dedup-v1]
+    paths: ['.github/workflows/visual-review-v2.yml','video/style_preview_v2.py']
+permissions:
+  contents: read
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install preview dependencies
+        run: |
+          python -m pip install -q Pillow numpy playwright
+          python -m playwright install --with-deps chromium
+      - name: Capture actual demo and render full HD preview
+        run: python video/style_preview_v2.py
+      - name: Verify video specification
+        run: |
+          ffprobe -v error -show_entries stream=codec_name,width,height,r_frame_rate -show_entries format=duration,size -of json visual-preview/Darkline_style_V2_preview.mp4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Darkline-style-V2-REVIEW
+          path: |
+            visual-preview/Darkline_style_V2_preview.mp4
+            visual-preview/storyboard.jpg
+            visual-preview/scene-*.jpg
+          retention-days: 14
