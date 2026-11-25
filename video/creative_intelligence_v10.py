@@ -103,10 +103,17 @@ def capture(key,p,out):
             a=open_page(browser,BASE+"digitalis-etlap.html?skin=dark",900,1100);admin(a,out)
         elif key=="crm":
             page=open_page(browser,url,1100,900)
-            snap(page,"#crm-stats",out/"hero.png");snap(page,"#crm-board",out/"feature.png")
+            # CRM is a native internal business tool: its customer tab is a
+            # snapshot; the genuine board is intentionally shown in owner view.
+            snap(page,"#ds-v23-editor",out/"hero.png")
+            page.locator("#ds-v23-owner").click(timeout=12000)
+            page.locator("#crm-board").wait_for(state="visible",timeout=15000)
+            snap(page,"#crm-board",out/"feature.png")
             card=page.locator('.crm-card[data-crm-id="105"]');card.click(timeout=12000)
             page.locator('.crm-card[data-crm-id="105"][aria-pressed="true"]').wait_for(timeout=12000)
-            snap(page,"#crm-detail",out/"detail.png");admin(page,out)
+            snap(page,"#crm-detail",out/"detail.png")
+            snap(page,"#crm-board",out/"admin.png")
+            snap(page,'.crm-card[data-crm-id="105"]',out/"admin_detail.png")
         elif key=="web":
             page=open_page(browser,url,1200,900)
             viewport(page,out/"hero.png");snap(page,"#szolgaltatasok",out/"feature.png");snap(page,"#portfolio",out/"detail.png");admin(page,out)
@@ -120,7 +127,7 @@ def capture(key,p,out):
             second=open_page(browser,url);snap(second,"#service-list",out/"feature.png")
             a=open_page(browser,url,900,1100);admin(a,out)
         browser.close()
-    return {"source":"real_demo_screenshots","overlay_dom_checks":"passed","admin_field":True}
+    return {"source":"real_demo_screenshots","overlay_dom_checks":"passed","admin_field":key!="crm","admin_view":"native CRM board and selected demo card" if key=="crm" else "editable field"}
 def run(args):return subprocess.check_output(args)
 def narrations(p,out):
     from piper import PiperVoice
