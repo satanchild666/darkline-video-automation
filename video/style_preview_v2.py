@@ -23,7 +23,8 @@ def capture():
             try:
                 if loc.first.is_visible():loc.first.click(timeout=1500)
             except Exception:pass
-        page.add_style_tag(content=".dlg-avatar,.dlg-thought-tour,.dl-advisor-tab,#darkline-ai-advisor-toggle{visibility:hidden!important}")
+        page.add_style_tag(content="#darkline-premium-guide,.dlg-avatar,.dlg-thought,.dlg-thought-tour,.dl-advisor-tab,#darkline-ai-advisor-toggle{display:none!important;pointer-events:none!important}")
+        page.wait_for_timeout(350)
         def shot(locator,name):
             locator.scroll_into_view_if_needed(timeout=12000)
             page.wait_for_timeout(280)
