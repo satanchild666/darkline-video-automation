@@ -1,0 +1,34 @@
+name: Darkline V7 cinematic live review
+on:
+  push:
+    branches: [dev/video-dedup-v1]
+    paths: ['.github/workflows/cinematic-live-review-v7.yml','video/cinematic_live_v7.py']
+permissions:
+  contents: read
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install preview dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-dejavu-core
+          python -m pip install -q Pillow numpy playwright
+          python -m playwright install --with-deps chromium
+      - name: Record live browser interactions and render cinematic motion
+        run: python video/cinematic_live_v7.py
+      - name: Verify technical output
+        run: |
+          ffprobe -v error -show_entries stream=codec_name,width,height,r_frame_rate -show_entries format=duration,size -of json cinematic-live-v7/Darkline_cinematic_V7.mp4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Darkline-cinematic-V7-REVIEW
+          path: |
+            cinematic-live-v7/Darkline_cinematic_V7.mp4
+            cinematic-live-v7/storyboard.jpg
+            cinematic-live-v7/scene-*.jpg
+          retention-days: 14
