@@ -24,17 +24,29 @@ jobs:
           class NoRedirect(urllib.request.HTTPRedirectHandler):
               def redirect_request(self, *args, **kwargs): return None
           token=os.environ.get('DARKLINE_TEST_TOKEN','')
-          if len(token)<32: raise SystemExit('Missing configured token')
-          req=urllib.request.Request('https://darkline-ai-growth.marksz0430.workers.dev/test-buffer', data=b'{}', method='POST', headers={'Content-Type':'application/json','Accept':'application/json','User-Agent':'DarklineStudioVideoAutomation/1.0 (GitHub Actions)','x-darkline-test-token':token})
-          try:
-              with urllib.request.build_opener(NoRedirect()).open(req,timeout=60) as resp:
-                  result=json.loads(resp.read(262144))
-                  if result.get('status')!='BUFFER_CONNECTED': raise SystemExit('Unexpected connection response')
-                  print('AUTHENTICATED_WORKER_CONNECTION_OK')
-          except urllib.error.HTTPError as e:
-              body=e.read(1000)
-              print('HTTP_STATUS',e.code,'CLOUDFLARE_1010',b'1010' in body)
-              raise SystemExit(1)
+          if len(token)<32: raise SystemExit('TOKEN_MISSING_OR_TOO_SHORT')
+          print('TOKEN_HAS_OUTER_WHITESPACE',token!=token.strip())
+          def probe(value):
+              req=urllib.request.Request('https://darkline-ai-growth.marksz0430.workers.dev/test-buffer', data=b'{}', method='POST', headers={'Content-Type':'application/json','Accept':'application/json','User-Agent':'DarklineStudioVideoAutomation/1.0 (GitHub Actions)','x-darkline-test-token':value})
+              try:
+                  with urllib.request.build_opener(NoRedirect()).open(req,timeout=60) as resp:
+                      result=json.loads(resp.read(262144))
+                      return 'AUTHENTICATED_WORKER_CONNECTION_OK' if result.get('status')=='BUFFER_CONNECTED' else 'UNEXPECTED_SUCCESS_RESPONSE'
+              except urllib.error.HTTPError as e:
+                  body=e.read(2048)
+                  if b'1010' in body and e.code==403: return 'CLOUDFLARE_1010'
+                  try: obj=json.loads(body)
+                  except (ValueError,UnicodeError): obj={}
+                  if e.code==403 and isinstance(obj,dict) and obj.get('error')=='Unauthorized': return 'WORKER_TOKEN_REJECTED'
+                  if e.code==502 and isinstance(obj,dict): return 'WORKER_UPSTREAM_ERROR'
+                  return f'OTHER_HTTP_{e.code}'
+              except (ValueError,urllib.error.URLError): return 'INVALID_HEADER_OR_CONNECTION'
+          result=probe(token)
+          print('CONNECTION_CLASSIFICATION',result)
+          if result!='AUTHENTICATED_WORKER_CONNECTION_OK' and token!=token.strip() and len(token.strip())>=32:
+              result=probe(token.strip())
+              print('TRIMMED_TOKEN_CLASSIFICATION',result)
+          if result!='AUTHENTICATED_WORKER_CONNECTION_OK': raise SystemExit(1)
           PY
       - name: Compile Python files
         if: always()
@@ -42,6 +54,5 @@ jobs:
       - name: Run MP4 regression tests
         if: always()
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq ffmpeg
+          command -v ffmpeg >/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg)
           python -m unittest discover -s video -p 'test_video_dedup.py' -v
