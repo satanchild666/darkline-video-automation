@@ -25,28 +25,30 @@ jobs:
               def redirect_request(self, *args, **kwargs): return None
           token=os.environ.get('DARKLINE_TEST_TOKEN','')
           if len(token)<32: raise SystemExit('TOKEN_MISSING_OR_TOO_SHORT')
-          print('TOKEN_HAS_OUTER_WHITESPACE',token!=token.strip())
-          def probe(value):
-              req=urllib.request.Request('https://darkline-ai-growth.marksz0430.workers.dev/test-buffer', data=b'{}', method='POST', headers={'Content-Type':'application/json','Accept':'application/json','User-Agent':'DarklineStudioVideoAutomation/1.0 (GitHub Actions)','x-darkline-test-token':value})
+          base='https://darkline-ai-growth.marksz0430.workers.dev'
+          def probe(path,value,header='x-darkline-video-token'):
+              req=urllib.request.Request(base+path, data=b'{}', method='POST', headers={'Content-Type':'application/json','Accept':'application/json','User-Agent':'DarklineStudioVideoAutomation/1.0 (GitHub Actions)',header:value})
               try:
                   with urllib.request.build_opener(NoRedirect()).open(req,timeout=60) as resp:
                       result=json.loads(resp.read(262144))
-                      return 'AUTHENTICATED_WORKER_CONNECTION_OK' if result.get('status')=='BUFFER_CONNECTED' else 'UNEXPECTED_SUCCESS_RESPONSE'
+                      return 'VIDEO_AUTH_OK' if result.get('status')=='VIDEO_AUTH_OK' and result.get('sideEffects') is False else 'UNEXPECTED_SUCCESS'
               except urllib.error.HTTPError as e:
                   body=e.read(2048)
                   if b'1010' in body and e.code==403: return 'CLOUDFLARE_1010'
                   try: obj=json.loads(body)
                   except (ValueError,UnicodeError): obj={}
                   if e.code==403 and isinstance(obj,dict) and obj.get('error')=='Unauthorized': return 'WORKER_TOKEN_REJECTED'
-                  if e.code==502 and isinstance(obj,dict): return 'WORKER_UPSTREAM_ERROR'
                   return f'OTHER_HTTP_{e.code}'
               except (ValueError,urllib.error.URLError): return 'INVALID_HEADER_OR_CONNECTION'
-          result=probe(token)
-          print('CONNECTION_CLASSIFICATION',result)
-          if result!='AUTHENTICATED_WORKER_CONNECTION_OK' and token!=token.strip() and len(token.strip())>=32:
-              result=probe(token.strip())
-              print('TRIMMED_TOKEN_CLASSIFICATION',result)
-          if result!='AUTHENTICATED_WORKER_CONNECTION_OK': raise SystemExit(1)
+          checks=[
+              ('VIDEO_TOKEN',probe('/video-auth-check',token),'VIDEO_AUTH_OK'),
+              ('LEGACY_HEADER',probe('/video-auth-check',token,'x-darkline-test-token'),'VIDEO_AUTH_OK'),
+              ('WRONG_TOKEN',probe('/video-auth-check','invalid-test-token-not-a-real-secret'),'WORKER_TOKEN_REJECTED'),
+              ('ADMIN_SCOPE',probe('/test-buffer',token,'x-darkline-test-token'),'WORKER_TOKEN_REJECTED'),
+          ]
+          for name,actual,expected in checks:
+              print('AUTH_QA',name,actual,'PASS' if actual==expected else 'FAIL')
+          if any(actual!=expected for _,actual,expected in checks): raise SystemExit(1)
           PY
       - name: Compile Python files
         if: always()
