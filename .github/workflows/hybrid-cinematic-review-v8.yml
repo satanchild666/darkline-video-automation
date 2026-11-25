@@ -1,0 +1,36 @@
+name: Darkline V8 hybrid cinematic review
+on:
+  push:
+    branches: [dev/video-dedup-v1]
+    paths: ['.github/workflows/hybrid-cinematic-review-v8.yml','video/hybrid_cinematic_v8.py']
+permissions:
+  contents: read
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install preview dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-dejavu-core
+          python -m pip install -q Pillow numpy playwright
+          python -m playwright install --with-deps chromium
+      - name: Record timed live clips and render hybrid cinematic motion
+        run: python video/hybrid_cinematic_v8.py
+      - name: Verify technical output
+        run: |
+          ffprobe -v error -show_entries stream=codec_name,width,height,r_frame_rate -show_entries format=duration,size -of json hybrid-preview-v8/Darkline_hybrid_V8.mp4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Darkline-hybrid-V8-REVIEW
+          path: |
+            hybrid-preview-v8/Darkline_hybrid_V8.mp4
+            hybrid-preview-v8/storyboard.jpg
+            hybrid-preview-v8/scene-*.jpg
+            hybrid-preview-v8/capture_report.json
+            hybrid-preview-v8/motion_report.json
+          retention-days: 14
