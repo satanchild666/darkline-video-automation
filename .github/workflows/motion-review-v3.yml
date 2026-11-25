@@ -1,0 +1,34 @@
+name: Darkline V3 motion review
+on:
+  push:
+    branches: [dev/video-dedup-v1]
+    paths: ['.github/workflows/motion-review-v3.yml','video/motion_preview_v3.py']
+permissions:
+  contents: read
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install preview dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-dejavu-core
+          python -m pip install -q Pillow numpy playwright
+          python -m playwright install --with-deps chromium
+      - name: Capture real before and after states and render motion
+        run: python video/motion_preview_v3.py
+      - name: Verify technical output
+        run: |
+          ffprobe -v error -show_entries stream=codec_name,width,height,r_frame_rate -show_entries format=duration,size -of json motion-preview/Darkline_motion_V3.mp4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Darkline-motion-V3-REVIEW
+          path: |
+            motion-preview/Darkline_motion_V3.mp4
+            motion-preview/storyboard.jpg
+            motion-preview/scene-*.jpg
+          retention-days: 14
