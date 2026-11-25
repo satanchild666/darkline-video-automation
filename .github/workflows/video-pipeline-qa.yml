@@ -1,0 +1,31 @@
+name: Darkline full video pipeline QA
+on:
+  push:
+    branches: [dev/video-dedup-v1]
+    paths:
+      - '.github/workflows/video-pipeline-qa.yml'
+permissions:
+  contents: write
+concurrency:
+  group: darkline-daily-video
+  cancel-in-progress: false
+jobs:
+  video:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install video dependencies
+        run: |
+          command -v ffmpeg >/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg fonts-dejavu-core)
+          python -m pip install --disable-pip-version-check 'Pillow>=11,<13' 'numpy>=1.26,<3'
+      - name: Test real MP4 duplicate screening
+        run: python -m unittest discover -s video -p 'test_video_dedup.py' -v
+      - name: Run full video pipeline (Buffer draft only)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DARKLINE_TEST_TOKEN: ${{ secrets.DARKLINE_TEST_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: python video/publish_automation.py
