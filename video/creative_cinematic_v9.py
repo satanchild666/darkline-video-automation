@@ -341,11 +341,18 @@ def menu_capture():
         page.frame_locator("#dlb-frame").locator("body").wait_for(timeout=20000)
         page.wait_for_timeout(450)
         page.screenshot(path=str(OUT/"menu_daily.png"),animations="disabled")
-        page.locator('[data-tab="etlap"]').click(timeout=12000)
-        frame.locator("#ds-v23-owner").wait_for(timeout=20000)
-        frame.locator("#ds-v23-owner").click(timeout=12000)
-        frame.locator("#ds-v23-panel").wait_for(state="visible")
-        frame.locator("#ds-v23-editor").screenshot(path=str(OUT/"menu_admin.png"),animations="disabled")
+        # Open the same genuine menu directly; the parent iframe auto-resizes
+        # continuously, making the embedded owner button unstable in Playwright.
+        owner=browser.new_page(viewport={"width":900,"height":1100},device_scale_factor=1.5)
+        isolate(owner)
+        owner.goto("https://darkline-studio.web.app/demok/digitalis-etlap.html?skin=dark",wait_until="domcontentloaded",timeout=45000)
+        owner.locator("#ds-v23-owner").wait_for(timeout=20000)
+        clean(owner)
+        owner.locator("#ds-v23-owner").click(timeout=12000)
+        owner.locator("#ds-v23-panel").wait_for(state="visible")
+        editor=owner.locator("#ds-v23-editor")
+        editor.wait_for(state="visible")
+        editor.screenshot(path=str(OUT/"menu_admin.png"),animations="disabled",timeout=15000)
         browser.close()
     print("MENU_REAL_STATES_OK category, daily tab, owner view; no order or save",flush=True)
 def menu_bg(t,s):
@@ -464,12 +471,24 @@ def check_quality(path,expected,min_open):
     print("V9_QUALITY_GATE",json.dumps(report),flush=True)
     return report
 if __name__=="__main__":
-    capture();render();motion_qa()
-    menu_capture();menu_render()
-    reports=[check_quality(OUT/"Darkline_auto_V9.mp4",sum(DUR),2.5),check_quality(OUT/"Darkline_menu_V9.mp4",sum(MENU_DUR),1.0)]
+    reports=[]
+    def failed(name,exc):
+        reports.append({"file":name,"review_gate":"REJECT","reasons":["render_failed"],"error":str(exc)[:500]})
+        print("V9_VARIANT_FAILED",name,str(exc)[:500],flush=True)
     try:
+        capture();render();motion_qa()
+        reports.append(check_quality(OUT/"Darkline_auto_V9.mp4",sum(DUR),2.5))
+    except Exception as exc:
+        failed("Darkline_auto_V9.mp4",exc)
+    try:
+        if not (OUT/"Darkline_auto_V9.mp4").exists():raise RuntimeError("Auto base video unavailable")
         narrate();reports.append(check_quality(OUT/"Darkline_auto_V9_narrated.mp4",sum(DUR),2.5))
     except Exception as exc:
-        reports.append({"file":"Darkline_auto_V9_narrated.mp4","review_gate":"REJECT","reasons":["narration_failed"],"error":str(exc)[:250]})
-        print("V9_NARRATION_FAILED",str(exc)[:250],flush=True)
+        failed("Darkline_auto_V9_narrated.mp4",exc)
+    try:
+        menu_capture();menu_render()
+        reports.append(check_quality(OUT/"Darkline_menu_V9.mp4",sum(MENU_DUR),1.0))
+    except Exception as exc:
+        failed("Darkline_menu_V9.mp4",exc)
     (OUT/"quality_gate.json").write_text(json.dumps(reports,indent=2),encoding="utf8")
+    if not any(r["review_gate"]=="PASS" for r in reports):raise RuntimeError("No sample met technical review thresholds")
