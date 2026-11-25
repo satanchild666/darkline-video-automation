@@ -1,0 +1,40 @@
+name: Darkline V9 creative cinematic review
+on:
+  push:
+    branches: [dev/video-dedup-v1]
+    paths: ['.github/workflows/creative-cinematic-review-v9.yml','video/creative_cinematic_v9.py']
+permissions:
+  contents: read
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install preview dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-dejavu-core
+          python -m pip install -q Pillow numpy playwright piper-tts
+          python -m playwright install --with-deps chromium
+      - name: Record two service demos, render and test neural narration
+        run: python video/creative_cinematic_v9.py
+      - name: Verify technical output
+        run: |
+          ffprobe -v error -show_entries stream=codec_name,width,height,r_frame_rate -show_entries format=duration,size -of json creative-preview-v9/Darkline_auto_V9.mp4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Darkline-creative-V9-REVIEW
+          path: |
+            creative-preview-v9/Darkline_*_V9*.mp4
+            creative-preview-v9/storyboard.jpg
+            creative-preview-v9/scene-*.jpg
+            creative-preview-v9/capture_report.json
+            creative-preview-v9/motion_report.json
+            creative-preview-v9/quality_gate.json
+            creative-preview-v9/menu_storyboard.jpg
+            creative-preview-v9/menu-scene-*.jpg
+            creative-preview-v9/narration.txt
+          retention-days: 14
