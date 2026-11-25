@@ -10,8 +10,8 @@ import tempfile
 import re
 from video_dedup import fingerprint, check, save, validate, sha256, MAX_HISTORY
 from datetime import datetime
-from urllib.request import Request,urlopen
-from urllib.error import HTTPError
+from urllib.request import Request,build_opener,HTTPRedirectHandler
+from urllib.error import HTTPError, URLError
 from zoneinfo import ZoneInfo
 
 BASE='https://darkline-ai-growth.marksz0430.workers.dev'
@@ -19,14 +19,33 @@ repo=os.environ['GITHUB_REPOSITORY']
 token=os.environ.get('DARKLINE_TEST_TOKEN','')
 if len(token)<32: raise SystemExit('DARKLINE_TEST_TOKEN missing/too short; add it in GitHub Actions Secrets')
 
+class NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
 def post(path,obj):
+    if path not in ('/video-plan','/video-draft'):
+        raise ValueError('Unexpected Worker endpoint')
     req=Request(BASE+path,data=json.dumps(obj,ensure_ascii=False).encode(),method='POST',headers={
-        'Content-Type':'application/json','x-darkline-test-token':token})
+        'Content-Type':'application/json','Accept':'application/json',
+        'User-Agent':'DarklineStudioVideoAutomation/1.0 (GitHub Actions)',
+        'x-darkline-test-token':token})
     try:
-        with urlopen(req,timeout=60) as r: result=json.loads(r.read(12000))
+        with build_opener(NoRedirect()).open(req,timeout=60) as r:
+            body=r.read(262145)
+            if len(body)>262144: raise RuntimeError('Worker response too large')
+            if 'application/json' not in r.headers.get('Content-Type','').lower():
+                raise RuntimeError('Worker returned non-JSON response')
+            result=json.loads(body)
+            if not isinstance(result,dict): raise RuntimeError('Invalid Worker response')
+            return result
     except HTTPError as e:
-        raise RuntimeError(f'Worker {path}: HTTP {e.code}, {e.read(1000).decode(errors="replace")}') from None
-    return result
+        body=e.read(1000).decode(errors='replace')
+        if e.code==403 and '1010' in body:
+            raise RuntimeError('Worker blocked by Cloudflare browser integrity check (1010); inspect security settings') from None
+        raise RuntimeError(f'Worker {path}: HTTP {e.code}; request not retried') from None
+    except URLError as e:
+        raise RuntimeError(f'Worker {path}: connection failed; request not retried') from None
 
 def gh(*args,check=True):
     return subprocess.run(['gh',*args],capture_output=True,text=True,check=check)
