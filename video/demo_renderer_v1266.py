@@ -199,6 +199,9 @@ def frame(topic,shots,s,n,edges,caps,en):
     elif family=="web":d.rounded_rectangle((975,35,1040,70),radius=8,outline=accent,width=3)
     d.rectangle((40,282,1040,287),fill=secondary)
     d.rectangle((40,282,40+round(1000*(n+1)/edges[-1]),287),fill=accent)
+    if s==0:
+        from opening_v12663 import opening_header
+        im.paste(opening_header(topic.scenes[0][0],bg,accent,n-edges[s]),(0,65))
     return im
 
 @contextmanager
@@ -224,5 +227,7 @@ def selftest():
         # Exact UI region and lower caption/mascot preserved.
         assert a.crop((20,288,1060,1435)).tobytes()==b.crop((20,288,1060,1435)).tobytes()
         assert a.crop((0,1435,1080,1920)).tobytes()==b.crop((0,1435,1080,1920)).tobytes()
+    from opening_v12663 import selftest as opening_test
+    opening_test(cat.NEW,cat.META,PALETTES)
     print("V1266_STYLE_PASS five distinct accents; original UI and subtitle pixels preserved; allowlist checks")
 if __name__=="__main__":selftest()
