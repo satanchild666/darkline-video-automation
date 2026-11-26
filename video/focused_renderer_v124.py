@@ -188,11 +188,24 @@ def bundle(out):
     (sealed/"Darkline_V124_daily.dlenc").write_bytes(seal.seal(p.read_bytes(),serialization.load_pem_public_key(base.PUBLIC_KEY)))
 def selftest():
     cat.validate_catalogue()
-    x,y,z=camera([120,320,240,40]);assert 0<=x<=40 and .88<=z<=1
-    for box in ([0,0,10,10],[10,20,510,30],[20,20,60,400]):
+    # The previous 360px height limit was replaced by the measured 516px crop
+    # with 9px margins. Verify actual containment at the tightest zoom.
+    def verify(box,vw=VW):
+        x,y,z=camera(box,vw,VH)
+        assert 0<=x<=vw-CW and 0<=y<=VH-CH and .88<=z<=1
+        left=x+CW*(1-z)/2;top=y+CH*(1-z)/2
+        bx,by,bw,bh=box
+        assert bx>=left+9-1e-6 and by>=top+9-1e-6
+        assert bx+bw<=left+CW*z-9+1e-6 and by+bh<=top+CH*z-9+1e-6
+    for width in (480,520,600,760):
+        verify([120,320,240,40],width)
+        verify([20,20,60,400],width)
+        verify([width/2-230,300,460,40],width)
+    for box in ([0,0,10,10],[10,20,510,30],[20,20,60,500],[20,20,0,40],[20,20,40,float("nan")]):
         try:camera(box)
         except RuntimeError:pass
-        else:raise AssertionError("Unsafe crop accepted")
+        else:raise AssertionError("Unsafe crop accepted: "+str(box))
+    print("V1243_CROP_TEST_OK 12 valid geometries, 5 invalid geometries",flush=True)
     t=cat.TOPICS[0];shots=[(Image.new("RGB",(960,1032),"#aaccee"),.88)]*10;edges=[i*120 for i in range(11)]
     im=frame(t,shots,0,5,edges,[{"start":0,"end":2,"text":"Az ajánlatkérés lépései."}],np.zeros(edges[-1]));assert im.size==(W,H)
     print("V124_RENDER_SELFTEST_OK",len(cat.TOPICS),"topics, measured focus geometry",flush=True)
