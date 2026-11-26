@@ -1,0 +1,122 @@
+name: Darkline V12.5.2 - ZONOS2 private Hungarian audition
+on:
+  push:
+    branches: ['dev/v12.5.1-moss-private-review']
+    paths: ['.github/workflows/zonos-v1252-review.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: darkline-zonos-v1252-private
+  cancel-in-progress: false
+jobs:
+  voice-review:
+    if: github.ref == 'refs/heads/dev/v12.5.1-moss-private-review'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check private reference availability without exposing it
+        env:
+          DARKLINE_MOSS_REFERENCE_B64: ${{ secrets.DARKLINE_MOSS_REFERENCE_B64 }}
+        run: |
+          python - <<'PY'
+          import os,base64
+          s=os.environ.get("DARKLINE_MOSS_REFERENCE_B64","")
+          if not s:raise SystemExit("MOSS_REFERENCE_MISSING: configure the existing prepared reference as an Actions secret; no synthesis attempted")
+          try:b=base64.b64decode(s,validate=True)
+          except Exception:raise SystemExit("MOSS_REFERENCE_INVALID")
+          if not 1000<=len(b)<=48000 or not b.startswith(b"OggS"):raise SystemExit("MOSS_REFERENCE_INVALID")
+          print("MOSS_REFERENCE_AVAILABLE")
+          PY
+      - name: Checkout exact approved renderer for existing encryption only
+        uses: actions/checkout@v4
+        with:
+          ref: 0578b45ee0c1a75265d53c43558583d6e55976e8
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build pinned ZONOS2 CPU runtime and download open model
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg cmake build-essential
+          git clone --no-checkout https://github.com/Zyphra/zonos2.cpp.git "$RUNNER_TEMP/zonos"
+          git -C "$RUNNER_TEMP/zonos" checkout --detach 66b8005eeec16c068cdc8c4f43f7014682e1f4cb
+          git -C "$RUNNER_TEMP/zonos" submodule update --init --recursive
+          cmake -S "$RUNNER_TEMP/zonos" -B "$RUNNER_TEMP/zonos/build" -DCMAKE_BUILD_TYPE=Release -DGGML_CUDA=OFF
+          cmake --build "$RUNNER_TEMP/zonos/build" --target zonos2-cli -j 4
+          python -m pip install -q numpy cryptography huggingface_hub
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from huggingface_hub import HfApi,snapshot_download
+          root=Path(os.environ["RUNNER_TEMP"])/"zonos"/"models"
+          repo="Zyphra/ZONOS2-GGUF"
+          sha=HfApi().model_info(repo).sha
+          print("ZONOS_MODEL_REVISION",sha)
+          snapshot_download(repo_id=repo,revision=sha,allow_patterns=["zonos2-q4_k.gguf","dac.gguf","spk-encoder.gguf"],local_dir=root)
+          PY
+          test -s "$RUNNER_TEMP/zonos/models/zonos2-q4_k.gguf"
+          test -s "$RUNNER_TEMP/zonos/models/dac.gguf"
+          test -s "$RUNNER_TEMP/zonos/models/spk-encoder.gguf"
+      - name: Restore reference into ephemeral private directory
+        env:
+          DARKLINE_MOSS_REFERENCE_B64: ${{ secrets.DARKLINE_MOSS_REFERENCE_B64 }}
+        run: |
+          umask 077
+          mkdir -p "$RUNNER_TEMP/darkline-private"
+          python - <<'PY'
+          import os,base64
+          from pathlib import Path
+          p=Path(os.environ["RUNNER_TEMP"])/"darkline-private"/"reference.ogg"
+          p.write_bytes(base64.b64decode(os.environ["DARKLINE_MOSS_REFERENCE_B64"],validate=True))
+          PY
+          ffmpeg -nostdin -v error -i "$RUNNER_TEMP/darkline-private/reference.ogg" -ac 1 -ar 48000 "$RUNNER_TEMP/darkline-private/reference.wav"
+          rm "$RUNNER_TEMP/darkline-private/reference.ogg"
+      - name: Generate one Hungarian voice sample on CPU
+        env:
+          HF_HUB_OFFLINE: '1'
+          TRANSFORMERS_OFFLINE: '1'
+        run: |
+          set -euo pipefail
+          umask 077
+          z="$RUNNER_TEMP/zonos"
+          cli="$(find "$z/build" -type f -name zonos2-cli -perm -u+x -print -quit)"
+          test -n "$cli"
+          "$cli" "$z/models/zonos2-q4_k.gguf" --tts "A Darkline Studio egyedi digitális megoldásokkal segíti a kisvállalkozásokat." "$RUNNER_TEMP/darkline-private/sample.wav" --dac "$z/models/dac.gguf" --clone "$RUNNER_TEMP/darkline-private/reference.wav" --spk-encoder "$z/models/spk-encoder.gguf" --seed 125201
+      - name: Validate waveform and encrypt owner review
+        run: |
+          umask 077
+          mkdir -p "$RUNNER_TEMP/darkline-sealed"
+          python - <<'PY'
+          import os,sys,json,io,zipfile,subprocess
+          from pathlib import Path
+          import numpy as np
+          from cryptography.hazmat.primitives import serialization
+          sys.path.insert(0,str(Path.cwd()/"video"))
+          import private_review_v111 as seal
+          # Dedicated audition public key; the matching private key never leaves the review environment.
+          public="-----BEGIN PUBLIC KEY-----\nMIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEApp/0kvJL+cWi3tAxxwz0\nQgOqMjwCofTXHePX84IRVpQqlPCu67nwUD5Wec5Xa74S7Mw2mrq6AaVjUTgR9Z8O\nQPoykgacXI0mhODYA+9U1CTDf1Bib3xi6O2aQnq3iDTbLNzuF964HY5y/UEa+8H4\nVByAhKNW52Uxa62N8nZOdQGq4rDT8MMUQ3dzkjyq9XIya9Sf8etq6V09co/fmT57\n4+bMv94AkqqD/lqRHWXSmHNUp+0DykokI4NBJ5ZI8dKOI+G9qJCP+bPQKK5Kt+zH\nmOY/eD29UHYDbwhY5fv982MrWTrXZVtm2zW94VeIw5iUl8Wvu1oVK6q2oAR1mWny\nCWpgEt9mZab6sAoKBRdFn0n+EltD+W7TqMRlSsH3IYCwP/BP6X5DGmU2emNFinav\norF72xOYYgkv4BRy7HpebmRqQSZkM0vQdD+QMGotXsrzqi3nbnjPwRkLKTr+v20b\nqx6aCWOdhM8J9owChiOL2mwY5HU2lXdbGGxm7YCVxOz1AgMBAAE=\n-----END PUBLIC KEY-----\n".encode("ascii")
+          d=Path(os.environ["RUNNER_TEMP"])/"darkline-private"; f=d/"sample.wav"
+          a=np.frombuffer(subprocess.check_output(["ffmpeg","-v","error","-i",str(f),"-ac","1","-ar","48000","-f","f32le","-"]),dtype="<f4")
+          dur=len(a)/48000
+          if not 1<=dur<=18 or not np.isfinite(a).all() or not .005<float(np.max(np.abs(a)))<.999:raise SystemExit("ZONOS_SAMPLE_REJECTED")
+          q={"duration":dur,"peak":float(np.max(np.abs(a))),"technical_gate":"PASS","human_voice_review":"required","publication":False,"paid_api":False,"engine":"ZONOS2-q4_k","owner_approved":False}
+          b=io.BytesIO()
+          with zipfile.ZipFile(b,"w",zipfile.ZIP_DEFLATED) as z:
+              z.write(f,"Darkline_V1252_zonos_sample.wav")
+              z.writestr("quality.json",json.dumps(q,indent=2))
+          (Path(os.environ["RUNNER_TEMP"])/"darkline-sealed"/"Darkline_V1252_zonos.dlenc").write_bytes(seal.seal(b.getvalue(),serialization.load_pem_public_key(public)))
+          print("ZONOS_V1252_TECHNICAL_PASS",json.dumps(q))
+          PY
+      - name: Upload encrypted review only
+        uses: actions/upload-artifact@v4
+        with:
+          name: Darkline-V1252-ENCRYPTED-ZONOS
+          path: ${{ runner.temp }}/darkline-sealed/*.dlenc
+          if-no-files-found: error
+          retention-days: 3
+      - name: Remove temporary reference and raw generated audio
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/darkline-private" "$RUNNER_TEMP/darkline-sealed" "$RUNNER_TEMP/zonos"
