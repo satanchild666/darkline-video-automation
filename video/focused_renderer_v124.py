@@ -39,48 +39,54 @@ def root(page,sel):
         return page.get_by_role("heading",name=sel[8:],exact=False).first
     return page.locator(sel).first
 def clamp(x,lo,hi):return max(lo,min(hi,x))
-def camera(box):
-    # The original focus box is visible during the complete animation (including 12% zoom).
+def camera(box,vw=VW,vh=VH):
+    # Keep all focal text inside the safe crop, including the rounded pixel coordinates.
     x,y,w,h=box
     if not all(math.isfinite(z) for z in box) or w<=0 or h<=0:raise RuntimeError("Invalid focus geometry")
-    if w>400 or h>360:raise RuntimeError("Focal element too large for readable close-up")
-    cx=clamp(x+w/2-CW/2,0,VW-CW);cy=clamp(y+h/2-CH/2,0,VH-CH)
+    if w>CW-18 or h>CH-18:raise RuntimeError("Focal element too large for readable close-up")
+    cx=round(clamp(x+w/2-CW/2,0,vw-CW));cy=round(clamp(y+h/2-CH/2,0,vh-CH))
     bx=x-cx;by=y-cy
-    if bx<8 or by<8 or bx+w>CW-8 or by+h>CH-8:raise RuntimeError("Focal text clipped")
-    # Maximal safe zoom around center; minimum 8px margins on source.
-    minw=max(2*abs(bx+w/2-CW/2)+w+16,CW*.88)
-    minh=max(2*abs(by+h/2-CH/2)+h+16,CH*.88)
+    if bx<9 or by<9 or bx+w>CW-9 or by+h>CH-9:raise RuntimeError("Focal text clipped")
+    minw=max(2*abs(bx+w/2-CW/2)+w+18,CW*.88)
+    minh=max(2*abs(by+h/2-CH/2)+h+18,CH*.88)
     zoom=max(minw/CW,minh/CH)
     if zoom>1:raise RuntimeError("Focus cannot remain in frame")
-    return (round(cx),round(cy),zoom)
+    return (cx,cy,zoom)
 def focus(page,loc,ordinal):
     loc.wait_for(state="visible",timeout=20000)
-    # Use actual headings, paragraphs, labels or buttons; never type into input or expose account data.
-    targets=loc.locator("h1:visible,h2:visible,h3:visible,h4:visible,p:visible,label:visible,button:visible")
-    if loc.evaluate("e=>/^(H[1-4]|P|LABEL|BUTTON)$/.test(e.tagName)"):targets=loc
+    selector="h1,h2,h3,h4,h5,h6,[role=heading],p,label,button"
+    targets=loc.locator(":is("+selector+"):visible")
+    if loc.evaluate("(e,s)=>e.matches(s)",selector):targets=loc
     count=targets.count()
     if not count:raise RuntimeError("No visible focal text")
-    # Rotate the real focal elements for repeated sections, with a bounded search.
+    problems=[]
     for j in range(min(count,30)):
         target=targets.nth((ordinal+j)%count)
         try:
             target.evaluate("e=>e.scrollIntoView({block:'center',inline:'center',behavior:'instant'})")
-            page.wait_for_timeout(180);cleanup(page)
+            page.wait_for_timeout(450);cleanup(page)
             data=target.evaluate("""e=>{
                 const s=getComputedStyle(e), text=(e.innerText||'').trim();
-                const r=document.createRange();r.selectNodeContents(e);
-                const rects=Array.from(r.getClientRects()).filter(x=>x.width>2&&x.height>2);
+                const walker=document.createTreeWalker(e,NodeFilter.SHOW_TEXT);
+                const rects=[];let node;
+                while(node=walker.nextNode()){
+                    if(!node.textContent.trim())continue;
+                    const range=document.createRange();range.selectNodeContents(node);
+                    rects.push(...Array.from(range.getClientRects()).filter(x=>x.width>2&&x.height>2));
+                }
                 if(!rects.length)return null;
                 const x=Math.min(...rects.map(x=>x.left)),y=Math.min(...rects.map(x=>x.top)),right=Math.max(...rects.map(x=>x.right)),bottom=Math.max(...rects.map(x=>x.bottom));
                 const unobstructed=rects.every(r=>{const q=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);return q&&(q===e||e.contains(q))});
                 return {text,box:[x,y,right-x,bottom-y],font:parseFloat(s.fontSize),unobstructed,visible:s.visibility==='visible'&&s.display!=='none'&&parseFloat(s.opacity)>0.95};
             }""")
-            if not data or not data["visible"] or not data["unobstructed"] or not 8<=len(data["text"])<=220:continue
-            if data["font"]*UIW/CW<MIN_TEXT:continue
-            x,y,z=camera(data["box"])
+            if not data:problems.append("no text rectangles");continue
+            if not data["visible"] or not data["unobstructed"]:problems.append("visibility or obstruction");continue
+            if not 8<=len(data["text"])<=220:problems.append("text length");continue
+            if data["font"]*UIW/CW<MIN_TEXT:problems.append("font below 32px");continue
+            x,y,z=camera(data["box"],page.viewport_size["width"],page.viewport_size["height"])
             return data,(x,y,z)
-        except (RuntimeError,ValueError):continue
-    raise RuntimeError("No unobstructed readable focal text in section")
+        except (RuntimeError,ValueError) as error:problems.append(str(error))
+    raise RuntimeError("No unobstructed readable focal text in section: "+", ".join(sorted(set(problems))))
 def capture(topic,out):
     shots=[];aud=[];seen={}
     with sync_playwright() as pw:
@@ -94,13 +100,24 @@ def capture(topic,out):
             page.wait_for_timeout(1800);cleanup(page);pages[k]=page
         for i,(_,k,sel,_) in enumerate(topic.scenes):
             page=pages[k];n=seen.get((k,sel),0);seen[k,sel]=n+1
-            data,(x,y,z)=focus(page,root(page,sel),n)
+            errors=[]
+            # Try responsive layouts of the SAME source element; never replace it with unrelated content.
+            for width in (VW,480,600,760):
+                page.set_viewport_size({"width":width,"height":VH})
+                page.wait_for_timeout(350);cleanup(page)
+                try:
+                    data,(x,y,z)=focus(page,root(page,sel),n)
+                    break
+                except RuntimeError as error:
+                    errors.append(str(error))
+                    print("V1242_FOCUS_REJECT",i+1,width,str(error),flush=True)
+            else:raise RuntimeError("Scene "+str(i+1)+" "+sel+" failed all responsive views: "+"; ".join(errors))
             with Image.open(io.BytesIO(page.screenshot(animations="disabled"))) as ss:
-                if ss.size!=(VW*2,VH*2):raise RuntimeError("Capture pixel density mismatch")
+                if ss.size!=(width*2,VH*2):raise RuntimeError("Capture pixel density mismatch")
                 im=ss.crop((x*2,y*2,(x+CW)*2,(y+CH)*2)).convert("RGB")
             im.save(out/f"shot-{i:02d}.png");shots.append((im,z))
             # Keep only a short public focal text excerpt, no full-page extraction or private data.
-            aud.append({"scene":i+1,"page":page.url,"selector":sel,"text":data["text"],"font_css_px":data["font"],"minimum_projected_px":round(data["font"]*UIW/CW,2),"unobstructed":True,"safe_zoom_ratio":z})
+            aud.append({"scene":i+1,"page":page.url,"selector":sel,"text":data["text"],"font_css_px":data["font"],"minimum_projected_px":round(data["font"]*UIW/CW,2),"unobstructed":True,"safe_zoom_ratio":z,"viewport_width":width})
             print("V124_CAPTURE",i+1,"font_px",aud[-1]["minimum_projected_px"],flush=True)
         ctx.close();browser.close()
     (out/"capture_report.json").write_text(json.dumps(aud,ensure_ascii=False,indent=2))
