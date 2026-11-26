@@ -1,39 +1,79 @@
-name: Darkline Studio - daily AI promotional video
+name: Darkline Studio - V12.5 autonomous daily video
 on:
   schedule:
     - cron: '17 13 * * *'
       timezone: 'Europe/Budapest'
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/darkline-video.yml']
 permissions:
   contents: write
 concurrency:
-  group: darkline-daily-video
+  group: darkline-v12-single-publisher
   cancel-in-progress: false
 jobs:
   video:
+    if: github.ref == 'refs/heads/main' && vars.DARKLINE_HEYGEN_FREE_ENABLED == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - name: Checkout
+      - name: Read-only state and free voice safety preflight
+        id: preflight
+        env:
+          DARKLINE_TEST_TOKEN: ${{ secrets.DARKLINE_TEST_TOKEN }}
+        run: |
+          python - <<'PY'
+          import datetime,json,os
+          from zoneinfo import ZoneInfo
+          from urllib.request import Request,build_opener,HTTPRedirectHandler
+          class NoRedirect(HTTPRedirectHandler):
+              def redirect_request(self,*a,**kw):return None
+          now=datetime.datetime.now(ZoneInfo("Europe/Budapest"))
+          token=os.environ.get("DARKLINE_TEST_TOKEN","")
+          if len(token)<32:raise RuntimeError("Missing auth")
+          req=Request("https://darkline-ai-growth.marksz0430.workers.dev/video-v124-state",data=json.dumps({"date":now.date().isoformat()}).encode(),headers={"Content-Type":"application/json","x-darkline-video-token":token,"User-Agent":"DarklineStudioVideoAutomation/1.0 (GitHub Actions)"},method="POST")
+          with build_opener(NoRedirect()).open(req,timeout=30) as r:state=json.loads(r.read(16384))
+          if state.get("status")!="V124_STATE_OK" or state.get("dailyEnabled") is not True or state.get("sideEffects") is not False:raise RuntimeError("Daily gate unavailable")
+          print("V125_LIVE_DAILY_STATE",json.dumps(state),flush=True)
+          enabled=not state.get("publication") and not state.get("generation") and now.hour<15 and now.astimezone(datetime.timezone.utc)<datetime.datetime(2026,12,1,tzinfo=datetime.timezone.utc)
+          with open(os.environ["GITHUB_OUTPUT"],"a") as f:f.write("enabled="+str(enabled).lower()+"\n")
+          if not enabled:print("V125_SKIP_ALREADY_ATTEMPTED_LATE_OR_EXPIRED")
+          PY
+      - name: Checkout exact owner-approved V12.4.4 renderer
+        if: steps.preflight.outputs.enabled == 'true'
         uses: actions/checkout@v4
-      - name: Python and video dependencies
+        with:
+          ref: 0578b45ee0c1a75265d53c43558583d6e55976e8
+          persist-credentials: false
+      - name: Install render and verification tools
+        if: steps.preflight.outputs.enabled == 'true'
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq ffmpeg fonts-dejavu-core
-          python -m pip install --disable-pip-version-check 'Pillow>=11,<13' 'numpy>=1.26,<3'
-      - name: Generate, render and save to Buffer drafts
+          python -m pip install -q 'Pillow>=11,<13' 'numpy>=1.26,<3' playwright cryptography
+          python -m playwright install --with-deps chromium
+          node video/video_publish_gate_v12.test.mjs
+          python video/autonomous_daily_v124.py --selftest
+      - name: Select, render, verify and schedule at 16:00 local time
+        if: steps.preflight.outputs.enabled == 'true'
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           DARKLINE_TEST_TOKEN: ${{ secrets.DARKLINE_TEST_TOKEN }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-        run: python video/publish_automation.py
-      - name: Keep workflow active and note successful run
-        if: success()
+          DARKLINE_HEYGEN_FREE_ENABLED: 'true'
+          HEYGEN_API_KEY: ${{ secrets.HEYGEN_API_KEY }}
+          HEYGEN_VOICE_ID: ${{ secrets.HEYGEN_VOICE_ID }}
         run: |
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git config user.name 'github-actions[bot]'
-          git add last-run.json
-          if ! git diff --cached --quiet; then
-            git commit -m "Video generated for $(date -u +%Y-%m-%d)"
-            git push
-          fi
+          umask 077
+          python video/autonomous_daily_v124.py
+      - name: Encrypted review only
+        if: always() && steps.preflight.outputs.enabled == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Darkline-V12.5-DAILY-ENCRYPTED-REVIEW
+          path: sealed-review-v124/*.dlenc
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Clean private files
+        if: always()
+        run: rm -rf private-preview-v124 sealed-review-v124 creative-preview-v10
