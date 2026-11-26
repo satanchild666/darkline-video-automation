@@ -1,0 +1,117 @@
+name: Darkline V12.5.1 - private free voice smoke test
+on:
+  push:
+    branches: ['dev/v12.5.1-moss-private-review']
+    paths: ['.github/workflows/moss-v1251-review.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: darkline-moss-v1251-private
+  cancel-in-progress: false
+jobs:
+  voice-review:
+    if: github.ref == 'refs/heads/dev/v12.5.1-moss-private-review'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check private reference availability without exposing it
+        env:
+          DARKLINE_MOSS_REFERENCE_B64: ${{ secrets.DARKLINE_MOSS_REFERENCE_B64 }}
+        run: |
+          python - <<'PY'
+          import os,base64
+          s=os.environ.get("DARKLINE_MOSS_REFERENCE_B64","")
+          if not s:raise SystemExit("MOSS_REFERENCE_MISSING: configure the existing prepared reference as an Actions secret; no synthesis attempted")
+          try:b=base64.b64decode(s,validate=True)
+          except Exception:raise SystemExit("MOSS_REFERENCE_INVALID")
+          if not 1000<=len(b)<=48000 or not b.startswith(b"OggS"):raise SystemExit("MOSS_REFERENCE_INVALID")
+          print("MOSS_REFERENCE_AVAILABLE")
+          PY
+      - name: Checkout exact approved renderer for existing encryption only
+        uses: actions/checkout@v4
+        with:
+          ref: 0578b45ee0c1a75265d53c43558583d6e55976e8
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install CPU-only local model and tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          git clone --no-checkout https://github.com/OpenMOSS/MOSS-TTS-Nano.git "$RUNNER_TEMP/moss"
+          git -C "$RUNNER_TEMP/moss" checkout --detach 8b7bcc9341b3b4ef3a3a58ba1338a7d85ff133eb
+          python -m pip install -q torch==2.7.0 torchaudio==2.7.0 --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -q 'numpy<3' 'transformers==4.57.1' 'sentencepiece>=0.1.99' 'onnxruntime>=1.20.0' soundfile huggingface_hub cryptography pillow
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from huggingface_hub import HfApi,snapshot_download
+          root=Path(os.environ["RUNNER_TEMP"])/"moss"/"models"
+          for name in ("MOSS-TTS-Nano-100M-ONNX","MOSS-Audio-Tokenizer-Nano-ONNX"):
+              repo="OpenMOSS-Team/"+name
+              sha=HfApi().model_info(repo).sha
+              print("MODEL_REVISION",name,sha)
+              snapshot_download(repo_id=repo,revision=sha,local_dir=root/name)
+          PY
+      - name: Restore reference into ephemeral private directory
+        env:
+          DARKLINE_MOSS_REFERENCE_B64: ${{ secrets.DARKLINE_MOSS_REFERENCE_B64 }}
+        run: |
+          umask 077
+          mkdir -p "$RUNNER_TEMP/darkline-private"
+          python - <<'PY'
+          import os,base64
+          from pathlib import Path
+          p=Path(os.environ["RUNNER_TEMP"])/"darkline-private"/"reference.ogg"
+          p.write_bytes(base64.b64decode(os.environ["DARKLINE_MOSS_REFERENCE_B64"],validate=True))
+          PY
+          ffmpeg -nostdin -v error -i "$RUNNER_TEMP/darkline-private/reference.ogg" -ac 1 -ar 48000 "$RUNNER_TEMP/darkline-private/reference.wav"
+          rm "$RUNNER_TEMP/darkline-private/reference.ogg"
+      - name: Generate one Hungarian voice sample offline
+        env:
+          HF_HUB_OFFLINE: '1'
+          TRANSFORMERS_OFFLINE: '1'
+          HF_HUB_DISABLE_TELEMETRY: '1'
+        run: |
+          umask 077
+          cd "$RUNNER_TEMP/moss"
+          python infer_onnx.py --execution-provider cpu --cpu-threads 4 --prompt-audio-path "$RUNNER_TEMP/darkline-private/reference.wav" --output-audio-path "$RUNNER_TEMP/darkline-private/sample.wav" --disable-wetext-processing --seed 125101 --text "A Darkline Studio egyedi digitális megoldásokkal segíti a kisvállalkozásokat."
+      - name: Validate waveform and encrypt owner review
+        run: |
+          umask 077
+          mkdir -p "$RUNNER_TEMP/darkline-sealed"
+          python - <<'PY'
+          import os,sys,json,io,zipfile,subprocess
+          from pathlib import Path
+          import numpy as np
+          from cryptography.hazmat.primitives import serialization
+          sys.path.insert(0,str(Path.cwd()/"video"))
+          import private_review_v111 as seal
+          # Read only the PEM literal from the exact approved renderer rather than loading all render dependencies.
+          import ast
+          tree=ast.parse((Path.cwd()/"video"/"private_review_v113.py").read_text())
+          public=next(ast.literal_eval(n.value) for n in tree.body if isinstance(n,ast.Assign) and any(isinstance(t,ast.Name) and t.id=="PUBLIC_KEY" for t in n.targets))
+          d=Path(os.environ["RUNNER_TEMP"])/"darkline-private"; f=d/"sample.wav"
+          a=np.frombuffer(subprocess.check_output(["ffmpeg","-v","error","-i",str(f),"-ac","1","-ar","48000","-f","f32le","-"]),dtype="<f4")
+          dur=len(a)/48000
+          if not 1<=dur<=18 or not np.isfinite(a).all() or not .005<float(np.max(np.abs(a)))<.999:raise SystemExit("MOSS_SAMPLE_REJECTED")
+          q={"duration":dur,"peak":float(np.max(np.abs(a))),"technical_gate":"PASS","human_voice_review":"required","publication":False,"paid_api":False}
+          b=io.BytesIO()
+          with zipfile.ZipFile(b,"w",zipfile.ZIP_DEFLATED) as z:
+              z.write(f,"Darkline_V1251_voice_sample.wav")
+              z.writestr("quality.json",json.dumps(q,indent=2))
+          (Path(os.environ["RUNNER_TEMP"])/"darkline-sealed"/"Darkline_V1251_voice.dlenc").write_bytes(seal.seal(b.getvalue(),serialization.load_pem_public_key(public)))
+          print("MOSS_V1251_TECHNICAL_PASS",json.dumps(q))
+          PY
+      - name: Upload encrypted review only
+        uses: actions/upload-artifact@v4
+        with:
+          name: Darkline-V1251-ENCRYPTED-VOICE
+          path: ${{ runner.temp }}/darkline-sealed/*.dlenc
+          if-no-files-found: error
+          retention-days: 3
+      - name: Remove temporary reference and raw generated audio
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/darkline-private" "$RUNNER_TEMP/darkline-sealed" "$RUNNER_TEMP/moss"
