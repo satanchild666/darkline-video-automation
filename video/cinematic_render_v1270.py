@@ -43,10 +43,12 @@ def texture(im,src,q):
     v=cv2.warpPerspective(src,m,(x2-x,y2-y),flags=cv2.INTER_LINEAR,borderMode=cv2.BORDER_REPLICATE)
     mask=np.zeros(v.shape[:2],np.uint8);cv2.fillConvexPoly(mask,np.rint(q-[x,y]).astype(np.int32),255,lineType=cv2.LINE_AA)
     cv2.copyTo(v,mask,im[y:y2,x:x2])
-def device(im,src,kind,t):
+def device(im,src,kind,t,opening=False):
     w0,h0=src.shape[1],src.shape[0];mobile=kind=='mobile'
     sw=660 if mobile else 956;sh=sw*h0/w0
     center=(540+8*math.sin(t*1.1),805+14*math.cos(t*1.3)) if mobile else (540+5*math.sin(t),685+13*math.cos(t*1.1))
+    if opening:
+        q=min(1,max(0,t/1.05));ease=q*q*(3-2*q);center=(center[0],center[1]-120*(1-ease))
     yaw=.075*math.sin(t*1.6)+(.04 if mobile else -.035);pitch=.045*math.cos(t*1.4)
     p=lambda pts:project(pts,center,yaw,pitch)
     bw,bh=sw+30,sh+44;outer=p(quad(bw,bh))
@@ -91,7 +93,7 @@ def main(captures,source,timing,out):
                 ok,old=cap.read()
                 if not ok:raise RuntimeError('original frames exhausted')
                 local=(n-start)/FPS;u=(n-start)/max(1,end-start-1);idx=min(len(clips)-1,round(u*(len(clips)-1)))
-                im=base.copy();device(im,clips[idx],DEVICES[s],local+s*.5)
+                im=base.copy();device(im,clips[idx],DEVICES[s],local+s*.5,opening=s==0)
                 im[1445:]=old[1445:]
                 cv2.rectangle(im,(34,1433),(1046,1438),(65,52,80),-1);cv2.rectangle(im,(34,1433),(34+round(1012*(n+1)/total),1438),(230,158,195),-1)
                 proc.stdin.write(im.tobytes())
