@@ -1,0 +1,80 @@
+name: Darkline V12.6.5.1 - production configuration review
+on:
+  push:
+    branches: ['dev/v12.5.1-moss-private-review']
+    paths: ['.github/workflows/marketing-v12651-deployment-review.yml']
+permissions:
+  contents: read
+jobs:
+  config:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 0578b45ee0c1a75265d53c43558583d6e55976e8
+          path: approved-renderer
+          persist-credentials: false
+      - run: |
+          python -m pip install -q pyyaml 'numpy>=1.26,<3' 'Pillow>=11,<13'
+          export PYTHONPATH="$PWD/video:$PWD/approved-renderer/video"
+          python video/heygen_budget_v126.py
+          python video/marketing_daily_v1265.py --selftest
+          python video/catalogue_v1265.py
+          python video/heygen_budget_adapter_v126.py
+          node video/worker_v1265_fallback.test.mjs
+          python - <<'PY'
+          import yaml,datetime as dt,os,json,tempfile,sys
+          from pathlib import Path
+          from types import SimpleNamespace
+          from unittest.mock import patch
+          import marketing_daily_v1263 as base, marketing_daily_v1265 as new
+          w=yaml.safe_load(Path("deployment/darkline-video-v1265.yml").read_text())
+          assert w[True]["schedule"]==[{"cron":c,"timezone":"Europe/Budapest"} for c in ("17 9 * * *","17 13 * * *","7 15 * * *")]
+          assert w["concurrency"]=={"group":"darkline-v12-single-publisher","cancel-in-progress":False}
+          steps=w["jobs"]["marketing"]["steps"]
+          assert steps[0]["with"]["ref"]=="7a9396e9527e38b8cdb22e7f65e22ed762242a7a"
+          assert steps[1]["with"]["ref"]=="0578b45ee0c1a75265d53c43558583d6e55976e8"
+          pre=next(s for s in steps if s.get("id")=="preflight")
+          code=pre["run"].split("python - <<'PY'\n",1)[1].rsplit("\nPY",1)[0]
+          compile(code,"production preflight","exec")
+          step=next(s for s in steps if s["name"].startswith("Execute one"))
+          assert step["if"]=="steps.preflight.outputs.execute == 'true'"
+          assert step["env"]["DARKLINE_HEYGEN_RATE_CEILING"]=="15"
+          assert step["env"]["DARKLINE_V126_EXPECTED_SLOT"]=="${{ steps.preflight.outputs.slot }}"
+          assert step["env"]["DARKLINE_V126_EXPECTED_DATE"]=="${{ steps.preflight.outputs.day }}"
+          morning={"status":"V126_MORNING_PREFLIGHT_OK","enabled":True,"slotState":None,"sideEffects":False}
+          video={"dailyEnabled":True,"publication":None,"generation":None}
+          fallback={"status":"V1265_FALLBACK_PREFLIGHT_OK","enabled":True,"clear":True,"video":None,"generation":None,"prior":None,"image":None,"sideEffects":False}
+          real=dt.datetime
+          count=0
+          def test(hour,minute,event,cron,allow,kind,blocked=False):
+              global count
+              fixed=real(2026,12,1,hour,minute,tzinfo=dt.timezone.utc)
+              class Clock(real):
+                  @classmethod
+                  def now(cls,tz=None):return fixed.astimezone(tz)
+              with tempfile.TemporaryDirectory() as d:
+                  ep=Path(d)/"event";op=Path(d)/"out";ep.write_text(json.dumps({"schedule":cron}))
+                  env={"GITHUB_EVENT_NAME":event,"GITHUB_EVENT_PATH":str(ep),"GITHUB_OUTPUT":str(op),"DARKLINE_TEST_TOKEN":"mock"*10}
+                  b=dict(fallback)
+                  if blocked:b.update(clear=False,generation="reserved")
+                  with patch.dict(os.environ,env),patch.object(dt,"datetime",Clock),patch.object(base,"worker",lambda *a:(200,morning)),patch.object(base,"preflight",lambda *a:video),patch.object(new,"fallback_request",lambda *a:(200,b)):
+                      exec(code,{})
+                  got=dict(x.split("=",1) for x in op.read_text().splitlines())
+                  assert got=={"execute":str(allow).lower(),"slot":kind,"day":"2026-12-01"},got
+                  count+=1
+          test(8,17,"schedule","17 9 * * *",True,"morning")
+          test(12,17,"schedule","17 13 * * *",True,"video")
+          test(14,7,"schedule","7 15 * * *",True,"fallback")
+          test(14,7,"schedule","17 13 * * *",False,"fallback")
+          test(14,7,"schedule","7 15 * * *",False,"fallback",True)
+          test(8,17,"push",None,False,"morning")
+          test(12,17,"push",None,False,"video")
+          test(14,7,"push",None,False,"fallback")
+          test(14,31,"schedule","7 15 * * *",False,"none")
+          print("V12651_PRODUCTION_CONFIG_PASS",count,"actual preflight cases; no network, no spend, no publication")
+          PY
