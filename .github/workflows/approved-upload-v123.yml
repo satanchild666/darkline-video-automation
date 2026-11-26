@@ -1,0 +1,42 @@
+name: Darkline V12.3 bounded content selection and approved upload
+on:
+  push:
+    branches: [dev/video-dedup-v1]
+    paths: ['.github/workflows/approved-upload-v123.yml']
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: darkline-v12-single-publisher
+  cancel-in-progress: false
+jobs:
+  selection-and-upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install verification tools and run offline tests
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          python -m pip install -q cryptography
+          python -m py_compile video/approved_upload_v123.py
+          python video/content_selection_v123_test.py
+          node video/video_publish_gate_v12.test.mjs
+      - name: Check approved video and select a safe editorial angle
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DARKLINE_TEST_TOKEN: ${{ secrets.DARKLINE_TEST_TOKEN }}
+        run: |
+          umask 077
+          python video/approved_upload_v123.py
+      - name: Store alternate topic plan only if a new video is required
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Darkline-V12.3-NEXT-TOPIC
+          path: v123-next-topic.json
+          if-no-files-found: ignore
+          retention-days: 7
