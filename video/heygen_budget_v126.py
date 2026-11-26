@@ -49,14 +49,13 @@ def reserve(claim,plan_data):
     if claim(key,plan_data) is not True: raise BudgetBlocked("duplicate or uncertain reservation")
     return key
 
-def github_claim(repo,branch,token,key,record):
-    # Dedicated branch must already exist, must never be reset or delete ledger files.
-    # No read-then-write race: PUT without sha creates only, existing file is rejected.
+def _github_create(repo,branch,token,key,record):
+    # The Contents API PUT without a SHA is create-only. Never retry a conflict
+    # or an ambiguous network result. Only HTTP 201 authorizes the caller.
     import base64
     from urllib.parse import quote
-    if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+",repo) or branch!="darkline-voice-budget-ledger" or not token:
+    if repo!="satanchild666/darkline-video-automation" or not token:
         raise BudgetBlocked("ledger configuration invalid")
-    if not re.fullmatch(r"voice-ledger/\d{4}-\d{2}-\d{2}-[12]\.json",key):raise BudgetBlocked("ledger key invalid")
     body={"message":"Reserve bounded narration slot "+key.rsplit("/",1)[-1],
           "branch":branch,"content":base64.b64encode(json.dumps(record,sort_keys=True).encode()).decode()}
     req=Request(f"https://api.github.com/repos/{repo}/contents/{quote(key,safe='/')}",data=json.dumps(body).encode(),
@@ -64,6 +63,19 @@ def github_claim(repo,branch,token,key,record):
     try:
         with build_opener(NoRedirect()).open(req,timeout=25) as r:return r.status==201
     except (HTTPError,URLError,TimeoutError,OSError):return False
+
+def github_claim(repo,branch,token,key,record):
+    # Production branch must never be reset or delete ledger files.
+    if branch!="darkline-voice-budget-ledger" or not re.fullmatch(r"voice-ledger/\d{4}-\d{2}-\d{2}-[12]\.json",key):
+        raise BudgetBlocked("production ledger configuration invalid")
+    return _github_create(repo,branch,token,key,record)
+
+def github_test_claim(repo,token,run,attempt):
+    # Fixed test branch, isolated namespace and no real voice metadata.
+    if not re.fullmatch(r"\d{1,20}",run) or not re.fullmatch(r"\d{1,5}",attempt):
+        raise BudgetBlocked("invalid test run")
+    return _github_create(repo,"darkline-voice-budget-ledger-test",token,
+        f"test-ledger/{run}-{attempt}.json",{"test_only":True,"run":run,"attempt":attempt,"reserved_micro_usd":0})
 
 def guarded_speech(text,slot,now,claim,send,paid_enabled=False,price_verified=False):
     """send is an injected, non-retrying fixed-model TTS adapter; no other model allowed."""
