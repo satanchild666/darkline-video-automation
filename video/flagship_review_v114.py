@@ -39,12 +39,17 @@ STORY=[
 def allowed(url):
     u=urlparse(url)
     return u.scheme=="https" and u.hostname=="darkline-studio.web.app" and u.port in (None,443) and u.path in ("/","/index.html","/megoldasok.html","/ajanlat.html","/ugyfelportal.html")
+def clean_public(page):
+    # Hide known floating overlays, never disable functional main-page modules or click controls.
+    page.evaluate("""()=>{for(const el of document.querySelectorAll('.intro-loader,.dlg-avatar,.dlg-thought,.dlg-thought-tour,.dl-advisor-widget,.dl-advisor-hint,.dl-advisor-tab,#darkline-ai-advisor-toggle,#darkline-premium-guide')){el.style.setProperty('display','none','important')}}""")
+    if not allowed(page.url):raise RuntimeError("Unexpected public page navigation")
+
 def capture(v,out):
     # Only public, allowlisted documents. Block navigation to demo paths and all form submissions.
     shots=[];audit=[]
     with v.sync_playwright() as pw:
         browser=pw.chromium.launch(headless=True,args=["--no-sandbox"])
-        ctx=browser.new_context(viewport={"width":1050,"height":1050},device_scale_factor=1.5)
+        ctx=browser.new_context(viewport={"width":1050,"height":1050},device_scale_factor=1.5,service_workers="block")
         def guard(route):
             req=route.request
             # Firestore public portfolio read transport uses POST; never permit commit/write endpoints.
@@ -57,30 +62,34 @@ def capture(v,out):
         ctx.route("**/*",guard)
         pages={}
         for key,path in PAGES.items():
-            page=ctx.new_page();v.isolate(page)
+            # Do not use demo isolation: it aborts smart-advisor.js, which builds the home adviser.
+            # Context routing stays active for every request, including all document navigation.
+            page=ctx.new_page()
             page.goto(HOST+path,wait_until="domcontentloaded",timeout=45000)
             page.wait_for_timeout(2200)
             if not allowed(page.url):raise RuntimeError("Unexpected public page navigation")
             # Hide intrusive prompts; no account login or real data entry.
-            page.add_style_tag(content=".intro-loader,.dlg-avatar,.dlg-thought,.dlg-thought-tour,.dl-advisor-widget,.dl-advisor-hint,#darkline-ai-advisor-toggle{display:none!important;visibility:hidden!important}")
-            v.clean(page)
+            page.add_style_tag(content=".intro-loader,.dlg-avatar,.dlg-thought,.dlg-thought-tour,.dl-advisor-widget,.dl-advisor-hint,#darkline-ai-advisor-toggle{display:none!important;visibility:hidden!important}"+v.CSS)
+            clean_public(page)
             pages[key]=page
         for i,(title,key,sel,_) in enumerate(STORY):
             page=pages[key]
+            print("V114_CAPTURE_START",i+1,key,sel,flush=True)
             if sel.startswith("heading:"):
                 loc=page.get_by_role("heading",name=sel[8:],exact=False).first
                 loc.wait_for(state="visible",timeout=20000)
                 parent=loc.locator("xpath=ancestor::*[self::article or self::section][1]")
                 loc=parent if parent.count() else loc.locator("xpath=..")
             else:loc=page.locator(sel).first
+            loc.wait_for(state="attached",timeout=30000)
+            loc.scroll_into_view_if_needed(timeout=15000);page.wait_for_timeout(750);clean_public(page)
             loc.wait_for(state="visible",timeout=20000)
-            loc.scroll_into_view_if_needed(timeout=15000);page.wait_for_timeout(500);v.clean(page)
             # Crop to the actual section, keeping text legible; avoid giant screenshots.
             box=loc.bounding_box()
             if not box or box["width"]<50 or box["height"]<30:raise RuntimeError("Empty section")
             if box["height"]>1250:
                 loc.evaluate("el=>el.scrollIntoView({block:'start',behavior:'instant'})")
-                page.wait_for_timeout(250);v.clean(page)
+                page.wait_for_timeout(250);clean_public(page)
                 box=loc.bounding_box()
                 # Viewport clip restricted to the requested section.
                 x=max(0,box["x"]);y=max(0,box["y"])
