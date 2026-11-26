@@ -1,0 +1,19 @@
+name: Darkline V12 video-only publishing QA
+on:
+  push:
+    branches: [dev/video-dedup-v1]
+    paths: ['video/video_publish_gate_v12*.mjs','.github/workflows/video-publish-gate-v12.yml']
+permissions:
+  contents: read
+jobs:
+  offline-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify independent video gate (no keys, no social writes)
+        run: |
+          node --check video/video_publish_gate_v12.mjs
+          node video/video_publish_gate_v12.test.mjs
