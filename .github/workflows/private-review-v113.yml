@@ -1,0 +1,53 @@
+name: Darkline V11.3 encrypted personal voice review
+on:
+  push:
+    branches: [dev/video-dedup-v1]
+    paths: ['video/private_review_v113.py','.github/workflows/private-review-v113.yml']
+permissions:
+  contents: read
+concurrency:
+  group: darkline-v11-private-review
+  cancel-in-progress: false
+jobs:
+  review:
+    if: vars.DARKLINE_HEYGEN_FREE_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check configuration and install renderer
+        env:
+          HEYGEN_API_KEY: ${{ secrets.HEYGEN_API_KEY }}
+          HEYGEN_VOICE_ID: ${{ secrets.HEYGEN_VOICE_ID }}
+        run: |
+          test -n "$HEYGEN_API_KEY" && test -n "$HEYGEN_VOICE_ID"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-dejavu-core
+          python -m pip install -q Pillow numpy playwright cryptography
+          python -m playwright install --with-deps chromium
+      - name: Test encryption and free-only policy
+        run: |
+          python -m py_compile video/private_review_v113.py
+          python video/heygen_free_voice_v11.py
+          python video/private_review_v113.py --selftest
+      - name: Render three motion-improved private reviews
+        env:
+          DARKLINE_HEYGEN_FREE_ENABLED: 'true'
+          HEYGEN_API_KEY: ${{ secrets.HEYGEN_API_KEY }}
+          HEYGEN_VOICE_ID: ${{ secrets.HEYGEN_VOICE_ID }}
+        run: |
+          umask 077
+          python video/private_review_v113.py
+      - name: Upload ciphertext only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Darkline-V11.3-ENCRYPTED-OWNER-REVIEW
+          path: sealed-review-v113/*.dlenc
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Delete private plaintext media
+        if: always()
+        run: rm -rf private-preview-v113 sealed-review-v113
