@@ -45,14 +45,14 @@ def texture(im,src,q):
     cv2.copyTo(v,mask,im[y:y2,x:x2])
 def device(im,src,kind,t):
     w0,h0=src.shape[1],src.shape[0];mobile=kind=='mobile'
-    sw=680 if mobile else 976;sh=sw*h0/w0
-    center=(540+8*math.sin(t*1.1),790+14*math.cos(t*1.3)) if mobile else (540+5*math.sin(t),685+13*math.cos(t*1.1))
+    sw=660 if mobile else 956;sh=sw*h0/w0
+    center=(540+8*math.sin(t*1.1),805+14*math.cos(t*1.3)) if mobile else (540+5*math.sin(t),685+13*math.cos(t*1.1))
     yaw=.075*math.sin(t*1.6)+(.04 if mobile else -.035);pitch=.045*math.cos(t*1.4)
     p=lambda pts:project(pts,center,yaw,pitch)
     bw,bh=sw+30,sh+44;outer=p(quad(bw,bh))
     poly(im,outer+[10,20],(18,15,23));poly(im,p(quad(bw+4,bh+4,10)),(72,69,87));poly(im,outer,(24,22,32));line(im,np.vstack([outer,outer[0]]),(137,120,165),2)
     if not mobile:
-        y=bh/2;deck=p([(-bw/2,y,0),(bw/2,y,0),(bw/2+20,y+94,-205),(-bw/2-20,y+94,-205)])
+        y=bh/2;deck=p([(-bw/2,y,0),(bw/2,y,0),(bw*.455,y+94,-205),(-bw*.455,y+94,-205)])
         poly(im,deck+[0,12],(34,30,45));poly(im,deck,(111,105,129));line(im,deck[2:4],(187,179,202),3)
         for row in range(4):
             yy=y+10+row*13;zz=-30-row*28
