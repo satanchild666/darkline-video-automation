@@ -1,0 +1,149 @@
+name: Darkline V12.5.8 - Hungarian VoxCPM2 natural prosody audition
+on:
+  push:
+    branches: ['dev/v12.5.1-moss-private-review']
+    paths: ['.github/workflows/voxcpm-v1258-review.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: darkline-voxcpm-v1258-review
+  cancel-in-progress: false
+jobs:
+  voice-review:
+    if: github.ref == 'refs/heads/dev/v12.5.1-moss-private-review'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check private reference availability without exposing it
+        env:
+          DARKLINE_MOSS_REFERENCE_B64: ${{ secrets.DARKLINE_MOSS_REFERENCE_B64 }}
+        run: |
+          python - <<'PY'
+          import os,base64
+          s=os.environ.get("DARKLINE_MOSS_REFERENCE_B64","")
+          if not s:raise SystemExit("MOSS_REFERENCE_MISSING: configure the existing prepared reference as an Actions secret; no synthesis attempted")
+          try:b=base64.b64decode(s,validate=True)
+          except Exception:raise SystemExit("MOSS_REFERENCE_INVALID")
+          if not 1000<=len(b)<=48000 or not b.startswith(b"OggS"):raise SystemExit("MOSS_REFERENCE_INVALID")
+          print("MOSS_REFERENCE_AVAILABLE")
+          PY
+      - name: Checkout exact approved renderer for existing encryption only
+        uses: actions/checkout@v4
+        with:
+          ref: 0578b45ee0c1a75265d53c43558583d6e55976e8
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install CPU runtime and prepare Hungarian model before restoring reference
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg libsndfile1
+          python -m pip install -q torch==2.8.0 torchaudio==2.8.0 --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -q 'torchcodec==0.6' 'transformers>=4.51,<5' 'numpy>=1.26,<2' cryptography 'faster-whisper==1.2.1' 'git+https://github.com/OpenBMB/VoxCPM.git@19b6bf7590025418821a86dcb817504e0ad7e5df'
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from huggingface_hub import HfApi,snapshot_download
+          from voxcpm import VoxCPM
+          import torch
+          assert not torch.cuda.is_available()
+          root=Path(os.environ["RUNNER_TEMP"])/"vox"
+          root.mkdir()
+          repo="sarpba/VoxCPM2_hun_alpha_2026.05.04"
+          info=HfApi().model_info(repo)
+          if getattr(info.card_data,"license",None)!="apache-2.0":raise RuntimeError("Model license needs review")
+          revision=info.sha
+          snapshot_download(repo_id=repo,revision=revision,local_dir=root/"model",allow_patterns=["*.json","*.safetensors","audiovae.pth","*.model","*.txt","*.tiktoken"])
+          (root/"revision.txt").write_text(revision)
+          snapshot_download(repo_id="Systran/faster-whisper-small",revision="536b0662742c02347bc0e980a01041f333bce120",local_dir=root/"asr",allow_patterns=["config.json","model.bin","tokenizer.json","vocabulary.*","preprocessor_config.json"])
+          print("V1258_MODEL_READY",revision,torch.__version__,flush=True)
+          PY
+      - name: Restore reference into ephemeral private directory
+        env:
+          DARKLINE_MOSS_REFERENCE_B64: ${{ secrets.DARKLINE_MOSS_REFERENCE_B64 }}
+        run: |
+          umask 077
+          mkdir -p "$RUNNER_TEMP/darkline-private"
+          python - <<'PY'
+          import os,base64
+          from pathlib import Path
+          p=Path(os.environ["RUNNER_TEMP"])/"darkline-private"/"reference.ogg"
+          p.write_bytes(base64.b64decode(os.environ["DARKLINE_MOSS_REFERENCE_B64"],validate=True))
+          PY
+          ffmpeg -nostdin -v error -i "$RUNNER_TEMP/darkline-private/reference.ogg" -ac 1 -ar 48000 "$RUNNER_TEMP/darkline-private/reference.wav"
+          rm "$RUNNER_TEMP/darkline-private/reference.ogg"
+      - name: Compare original and style-conditioned Hungarian voice
+        env:
+          HF_HUB_OFFLINE: '1'
+          TRANSFORMERS_OFFLINE: '1'
+          OMP_NUM_THREADS: '4'
+          MKL_NUM_THREADS: '4'
+        run: |
+          set -euo pipefail
+          umask 077
+          python - <<'PY'
+          import os,sys,json,io,zipfile,subprocess,re,unicodedata,time,random
+          from pathlib import Path
+          import numpy as np
+          import torch,soundfile as sf
+          from voxcpm import VoxCPM
+          from faster_whisper import WhisperModel
+          from cryptography.hazmat.primitives import serialization
+          sys.path.insert(0,str(Path.cwd()/"video"))
+          import private_review_v111 as seal
+          public="-----BEGIN PUBLIC KEY-----\nMIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEApp/0kvJL+cWi3tAxxwz0\nQgOqMjwCofTXHePX84IRVpQqlPCu67nwUD5Wec5Xa74S7Mw2mrq6AaVjUTgR9Z8O\nQPoykgacXI0mhODYA+9U1CTDf1Bib3xi6O2aQnq3iDTbLNzuF964HY5y/UEa+8H4\nVByAhKNW52Uxa62N8nZOdQGq4rDT8MMUQ3dzkjyq9XIya9Sf8etq6V09co/fmT57\n4+bMv94AkqqD/lqRHWXSmHNUp+0DykokI4NBJ5ZI8dKOI+G9qJCP+bPQKK5Kt+zH\nmOY/eD29UHYDbwhY5fv982MrWTrXZVtm2zW94VeIw5iUl8Wvu1oVK6q2oAR1mWny\nCWpgEt9mZab6sAoKBRdFn0n+EltD+W7TqMRlSsH3IYCwP/BP6X5DGmU2emNFinav\norF72xOYYgkv4BRy7HpebmRqQSZkM0vQdD+QMGotXsrzqi3nbnjPwRkLKTr+v20b\nqx6aCWOdhM8J9owChiOL2mwY5HU2lXdbGGxm7YCVxOz1AgMBAAE=\n-----END PUBLIC KEY-----\n".encode("ascii")
+          d=Path(os.environ["RUNNER_TEMP"])/"darkline-private"
+          root=Path(os.environ["RUNNER_TEMP"])/"vox"
+          out=Path(os.environ["RUNNER_TEMP"])/"darkline-sealed";out.mkdir()
+          torch.set_num_threads(4)
+          model=VoxCPM.from_pretrained(str(root/"model"),load_denoiser=False,optimize=False,device="cpu",local_files_only=True)
+          asr=WhisperModel(str(root/"asr"),device="cpu",compute_type="int8",cpu_threads=2,local_files_only=True)
+          text="Van egy ötleted, de nem tudod, hogyan indulj el? A Darkline Studio segít megtalálni a neked való megoldást."
+          def words(s):return re.findall(r"[^\W_]+",unicodedata.normalize("NFC",s).casefold())
+          def edit(a,b):
+              row=list(range(len(b)+1))
+              for i,x in enumerate(a,1):
+                  nxt=[i]
+                  for j,y in enumerate(b,1):nxt.append(min(nxt[-1]+1,row[j]+1,row[j-1]+(x!=y)))
+                  row=nxt
+              return row[-1]
+          profiles={"A_voxcpm_neutral":"","B_voxcpm_expressive":"(Natural conversational Hungarian, warm and confident, expressive but subtle intonation, clear articulation, genuine question intonation and relaxed pauses.)"}
+          report={"engine":"VoxCPM2 Hungarian alpha","model_revision":(root/"revision.txt").read_text(),"runtime":"19b6bf7590025418821a86dcb817504e0ad7e5df","publication":False,"paid_api":False,"owner_approved":False,"text":text,"profiles":{},"human_review_required":True}
+          buf=io.BytesIO()
+          with zipfile.ZipFile(buf,"w",zipfile.ZIP_DEFLATED) as b:
+              for name,instruction in profiles.items():
+                  try:
+                      random.seed(125801);np.random.seed(125801);torch.manual_seed(125801)
+                      start=time.monotonic()
+                      a=np.asarray(model.generate(text=instruction+text,reference_wav_path=str(d/"reference.wav"),cfg_value=2.0,inference_timesteps=10,max_len=400,normalize=False,denoise=False,retry_badcase=False),dtype=np.float32).reshape(-1)
+                      sr=int(model.tts_model.sample_rate)
+                      dur=len(a)/sr
+                      if not 2<=dur<=25 or not np.isfinite(a).all() or not .005<float(np.max(np.abs(a)))<1.2:raise RuntimeError("invalid output")
+                      path=d/(name+".wav");sf.write(str(path),np.clip(a,-.999,.999),sr)
+                      pcm=np.frombuffer(subprocess.check_output(["ffmpeg","-v","error","-i",str(path),"-ac","1","-ar","16000","-f","f32le","-"]),dtype="<f4").copy()
+                      seg,_=asr.transcribe(pcm,language="hu",beam_size=5,temperature=0,condition_on_previous_text=False)
+                      heard=" ".join(s.text.strip() for s in seg)
+                      report["profiles"][name]={"instruction":instruction,"duration":dur,"transcript":heard,"wer":edit(words(text),words(heard))/len(words(text)),"elapsed":round(time.monotonic()-start,2),"technical_gate":"PASS"}
+                      b.write(path,name+".wav")
+                      print("V1258_SAMPLE",name,json.dumps(report["profiles"][name],ensure_ascii=False),flush=True)
+                  except Exception as e:
+                      report["profiles"][name]={"technical_gate":"REJECT","error":type(e).__name__}
+                      print("V1258_SAMPLE_REJECT",name,type(e).__name__,flush=True)
+              b.writestr("quality.json",json.dumps(report,ensure_ascii=False,indent=2))
+          (out/"Darkline_V1258_voxcpm.dlenc").write_bytes(seal.seal(buf.getvalue(),serialization.load_pem_public_key(public)))
+          if not any(x["technical_gate"]=="PASS" for x in report["profiles"].values()):raise RuntimeError("No valid audition")
+          PY
+      - name: Upload encrypted audition only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Darkline-V1258-ENCRYPTED-VOXCPM
+          path: ${{ runner.temp }}/darkline-sealed/*.dlenc
+          if-no-files-found: warn
+          retention-days: 3
+      - name: Remove temporary private media
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/darkline-private" "$RUNNER_TEMP/darkline-sealed" "$RUNNER_TEMP/vox"
