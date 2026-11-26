@@ -1,4 +1,4 @@
-name: Darkline V12.4 autonomous daily private QA
+name: Darkline V12.4.2 responsive focal capture private QA
 on:
   push:
     branches: [dev/video-dedup-v1]
