@@ -1,0 +1,58 @@
+name: Darkline V12.7.0 - native responsive cinematic capture
+on:
+  push:
+    branches: ['dev/v12.5.1-moss-private-review']
+    paths: ['.github/workflows/cinematic-v1270-capture.yml']
+permissions:
+  contents: read
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 0578b45ee0c1a75265d53c43558583d6e55976e8
+          path: approved-renderer
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-dejavu-core
+          python -m pip install -q 'Pillow>=11,<13' 'numpy>=1.26,<3' playwright cryptography
+          python -m playwright install --with-deps chromium
+      - name: Capture actual desktop and phone browser states
+        run: |
+          umask 077
+          export PYTHONPATH="$PWD/video:$PWD/approved-renderer/video"
+          python video/cinematic_capture_v1270.py --out private-cinematic
+      - name: Seal private capture bundle
+        run: |
+          umask 077
+          export PYTHONPATH="$PWD/video:$PWD/approved-renderer/video"
+          python - <<'PY'
+          from pathlib import Path
+          import zipfile,io
+          from cryptography.hazmat.primitives import serialization
+          import private_review_v111 as seal
+          p=Path("private-cinematic");buf=io.BytesIO()
+          with zipfile.ZipFile(buf,"w",zipfile.ZIP_DEFLATED) as z:
+              for f in p.iterdir():
+                  if f.suffix in (".mp4",".png",".json"):z.write(f,arcname=f.name)
+          pub=serialization.load_pem_public_key("-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAygJUGhMWRMDELGMY34BA\n0GfDwDjj9rx9PT3KTBXwiXjzxU+u1aCtFEe0eZC4yzp4tw/DjccsMLLF/cmxTgHD\nTMXYhgV1Y0EmilVR9Sz0j9UQG2Zj3SIoIQ12c6HpzykvSzq9Zxr3hwQJTBZk21sF\nHTNOBfSZ4Wkwze5AM8sWH8cHcjB2N4AWYvsx1Cl54R5Wt1V0hfqQk4NNQ/00TR5W\nKqPGAd553fzTdWsOf8nr1Ew0VvDQZ59JrC9mGldH1D5s76AMVItspyLmPFgzumuj\nZN5n2KCHmmp8M5K3UrFat8d6Uc0g8AEZkQAsvWxXgRSQjYRhYCCs4AiDH/i/K9xA\nCwIDAQAB\n-----END PUBLIC KEY-----\n".encode())
+          dst=Path("sealed-cinematic");dst.mkdir()
+          (dst/"V1270_captures.dlenc").write_bytes(seal.seal(buf.getvalue(),pub))
+          print("V1270_CAPTURE_BUNDLE_PASS no speech or publication")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Darkline-V1270-ENCRYPTED-CAPTURES
+          path: sealed-cinematic/*.dlenc
+          retention-days: 7
+      - if: always()
+        run: rm -rf private-cinematic sealed-cinematic
