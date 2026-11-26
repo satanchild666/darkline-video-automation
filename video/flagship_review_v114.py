@@ -28,7 +28,7 @@ STORY=[
 ("Szolgáltatások és árak","prices","heading:Átlátható árazás","A szolgáltatások oldalán átlátható csomagokat és tájékoztató induló árakat találsz."),
 ("Mit tartalmaz a csomag?","prices","heading:Egyszerű, egyoldalas weboldal","Minden csomagnál megismerheted az alaptartalmat. A pontos terjedelmet írásban egyeztetjük."),
 ("Saját kezelőfelület","prices","heading:Nem kell engem hívnod","Az alapcsomagokhoz saját kezelőfelület jár, így a megfelelő tartalmakat önállóan módosíthatod."),
-("Ügyfélportál","home","#ugyfelbelepes","A meghívott ügyfelek az ügyfélportálon követhetik a projektjük állapotát, ajánlatát és üzeneteit."),
+("Ügyfélportál","home",".portal-spotlight__copy","A meghívott ügyfelek az ügyfélportálon követhetik a projektjük állapotát, ajánlatát és üzeneteit."),
 ("Biztonságos belépés","portal","heading:Ügyfélbelépés","Ez a saját projektek belépési pontja. Az ajánlatkéréshez azonban nem szükséges ügyfélfiók."),
 ("Árbecslő","home","#ajanlatkeres","Az árbecslő segít megtervezni az igényeidet és áttekinteni a választható megoldásokat."),
 ("Személyes ajánlat","quote","heading:Beszéljük át, mire van szükséged","Az ajánlatkérő néhány kérdéssel segít összefoglalni, mit szeretnél megvalósítani."),
@@ -47,7 +47,11 @@ def capture(v,out):
         ctx=browser.new_context(viewport={"width":1050,"height":1050},device_scale_factor=1.5)
         def guard(route):
             req=route.request
-            if req.method not in ("GET","HEAD","OPTIONS"):return route.abort()
+            # Firestore public portfolio read transport uses POST; never permit commit/write endpoints.
+            if req.method not in ("GET","HEAD","OPTIONS"):
+                u=urlparse(req.url)
+                read_only=(req.method=="POST" and u.scheme=="https" and u.hostname=="firestore.googleapis.com" and ("/google.firestore.v1.Firestore/Listen/channel" in u.path or u.path.endswith(":runQuery") or u.path.endswith(":batchGet")))
+                if not read_only:return route.abort()
             if req.is_navigation_request() and not allowed(req.url):return route.abort()
             return route.continue_()
         ctx.route("**/*",guard)
@@ -66,8 +70,8 @@ def capture(v,out):
             if sel.startswith("heading:"):
                 loc=page.get_by_role("heading",name=sel[8:],exact=False).first
                 loc.wait_for(state="visible",timeout=20000)
-                loc=loc.locator("xpath=ancestor::*[self::article or self::section][1]")
-                if not loc.count():raise RuntimeError("Heading container absent")
+                parent=loc.locator("xpath=ancestor::*[self::article or self::section][1]")
+                loc=parent if parent.count() else loc.locator("xpath=..")
             else:loc=page.locator(sel).first
             loc.wait_for(state="visible",timeout=20000)
             loc.scroll_into_view_if_needed(timeout=15000);page.wait_for_timeout(500);v.clean(page)
@@ -82,7 +86,11 @@ def capture(v,out):
                 x=max(0,box["x"]);y=max(0,box["y"])
                 width=min(1050-x,box["width"]);height=min(1050-y,box["height"])
                 if width<50 or height<50:raise RuntimeError("Invalid viewport clip")
-                page.screenshot(path=str(out/f"shot-{i:02d}.png"),clip={"x":x,"y":y,"width":width,"height":height},animations="disabled")
+                # Crop the actual viewport using pixel scale, not guessed page coordinates.
+                import io
+                with Image.open(io.BytesIO(page.screenshot(animations="disabled"))) as viewport:
+                    sx=viewport.width/1050;sy=viewport.height/1050
+                    viewport.crop((round(x*sx),round(y*sy),round((x+width)*sx),round((y+height)*sy))).save(out/f"shot-{i:02d}.png")
             else:
                 loc.screenshot(path=str(out/f"shot-{i:02d}.png"),animations="disabled",timeout=20000)
             shots.append(v.load(out/f"shot-{i:02d}.png"))
