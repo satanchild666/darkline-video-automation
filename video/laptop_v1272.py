@@ -81,7 +81,7 @@ class Laptop:
         # Separate milled lower shell, chamfer, upper palm rest and recessed keyboard well.
         self.box('base',(WIDTH,DEPTH,10),3.7,(0,0,5.8));self.box('edge',(WIDTH-.6,DEPTH-.6,2.4),1.15,(0,0,10.5));self.box('base',(WIDTH-1.6,DEPTH-1.6,1.8),.88,(0,0,12.0));self.box('black',(282,105,1.3),.60,(0,36,13.0))
         # Hinge integrated into the rear wall, under the black display chin.
-        self.box('black',(284,12,10),4,(0,98,12));self.box('lid',(270,8,7),3,(0,98,16))
+        self.box('black',(284,12,10),4,(0,98,12));self.box('lid',(270,8,7),3,(0,98,16));
         # Display's closed back, machined bezel, front glass and actual screen plane.
         self.box('lid',(WIDTH,LID_H,5.1),2.5,(0,LID_H/2,-.25),lid_transform)
         self.box('black',(WIDTH-2,LID_H-2,1.5),.72,(0,LID_H/2,2.5),lid_transform)
