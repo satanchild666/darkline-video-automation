@@ -69,14 +69,52 @@ def prepare(page,key):
         click_sample(page,"#service-list .service-card")
         page.locator("#staff-list").wait_for(state="visible")
     elif key.endswith("_admin") or key in ("demo_crm_board","demo_crm_detail"):
-        if not page.locator("#ds-v23-panel").is_visible():
+        if not page.locator("#ds-v23-panel").is_visible() or (key in ("demo_crm_board","demo_crm_detail") and not page.locator("#crm-board").is_visible()):
             click_sample(page,"#ds-v23-owner")
         page.locator("#ds-v23-panel").wait_for(state="visible")
+        if key in ("demo_crm_board","demo_crm_detail"):
+            page.locator("#crm-board").wait_for(state="visible",timeout=15000)
         if key=="demo_crm_detail":
             # Only the public built-in sample card, never external customer data.
             click_sample(page,'.crm-card[data-crm-id="105"]')
             page.locator('.crm-card[data-crm-id="105"][aria-pressed="true"]').wait_for(state="visible")
     clean_demo(page,key)
+def demo_focus(page,loc,ordinal,key):
+    loc.wait_for(state="visible",timeout=20000)
+    selector="h1,h2,h3,h4,h5,h6,[role=heading],p,label,button,[role=button],strong,b,span,div:not(:has(*))"
+    targets=loc.locator(":is("+selector+"):visible")
+    if loc.evaluate("(e,s)=>e.matches(s)",selector):targets=loc
+    count=targets.count()
+    if not count:raise RuntimeError("No visible focal text")
+    problems=[]
+    for j in range(min(count,30)):
+        target=targets.nth((ordinal+j)%count)
+        try:
+            target.evaluate("e=>e.scrollIntoView({block:'center',inline:'center',behavior:'instant'})")
+            page.wait_for_timeout(450);clean_demo(page,key)
+            data=target.evaluate("""e=>{
+                const s=getComputedStyle(e), text=(e.innerText||'').trim();
+                const walker=document.createTreeWalker(e,NodeFilter.SHOW_TEXT);
+                const rects=[];let node;
+                while(node=walker.nextNode()){
+                    if(!node.textContent.trim())continue;
+                    const range=document.createRange();range.selectNodeContents(node);
+                    rects.push(...Array.from(range.getClientRects()).filter(x=>x.width>2&&x.height>2));
+                }
+                if(!rects.length)return null;
+                const x=Math.min(...rects.map(x=>x.left)),y=Math.min(...rects.map(x=>x.top)),right=Math.max(...rects.map(x=>x.right)),bottom=Math.max(...rects.map(x=>x.bottom));
+                const unobstructed=rects.every(r=>{const q=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);return q&&(q===e||e.contains(q))});
+                return {text,box:[x,y,right-x,bottom-y],font:parseFloat(s.fontSize),unobstructed,visible:s.visibility==='visible'&&s.display!=='none'&&parseFloat(s.opacity)>0.95};
+            }""")
+            if not data:problems.append("no text rectangles");continue
+            if not data["visible"] or not data["unobstructed"]:problems.append("visibility or obstruction");continue
+            if not (3 if key in ('demo_auto_dates','demo_auto_slots','demo_salon_staff') else 8)<=len(data["text"])<=220:problems.append("text length");continue
+            x,y,z,cw,ch,projected=r.measured_crop(data["font"],data["box"],page.viewport_size["width"],page.viewport_size["height"])
+            data["projected"]=projected
+            return data,(x,y,z,cw,ch)
+        except (RuntimeError,ValueError) as error:problems.append(str(error))
+    raise RuntimeError("No unobstructed readable focal text in section: "+", ".join(sorted(set(problems))))
+
 def capture(topic,out):
     if topic.key not in cat.META:return ORIGINAL_CAPTURE(topic,out)
     shots=[];audit=[];seen={}
@@ -87,7 +125,7 @@ def capture(topic,out):
         try:
             for _,key,_,_ in topic.scenes:
                 if key in pages:continue
-                ctx=browser.new_context(viewport={"width":r.VW,"height":r.VH},device_scale_factor=2,service_workers="block")
+                ctx=browser.new_context(viewport={"width":1100 if key.startswith("demo_crm") else r.VW,"height":r.VH},device_scale_factor=2,service_workers="block")
                 contexts.append(ctx)
                 page=ctx.new_page()
                 if key in PATHS:
@@ -107,10 +145,10 @@ def capture(topic,out):
                 old=r.cleanup
                 try:
                     if key in PATHS:r.cleanup=lambda p,k=key:clean_demo(p,k)
-                    for width in (r.VW,480,600,760):
+                    for width in ((1100,900,760,600) if key.startswith('demo_crm') else (r.VW,480,600,760,900)):
                         page.set_viewport_size({"width":width,"height":r.VH});page.wait_for_timeout(350);r.cleanup(page)
                         try:
-                            data,(x,y,z,cw,ch)=r.focus(page,r.root(page,selector),n)
+                            data,(x,y,z,cw,ch)=(demo_focus(page,r.root(page,selector),n,key) if key in PATHS else r.focus(page,r.root(page,selector),n))
                             break
                         except Exception as e:errors.append(str(e)[:300])
                     else:raise RuntimeError("Scene "+str(i+1)+" "+key+" "+selector+" failed: "+"; ".join(errors))
