@@ -1,0 +1,19 @@
+name: Darkline V12.5 daily activation safety QA
+on:
+  push:
+    branches: [dev/video-dedup-v1]
+    paths: ['.github/workflows/daily-gate-v125.yml']
+permissions:
+  contents: read
+jobs:
+  daily-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: |
+          node video/video_publish_gate_v12.test.mjs
+          node video/worker_daily_v125.test.mjs
+          python -m py_compile video/own_voice_moss_v125.py
