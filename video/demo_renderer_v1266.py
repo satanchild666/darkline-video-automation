@@ -36,6 +36,10 @@ def demo_guard(route,key):
     if u.path.startswith(("/api/","/auth/","/functions/")):return route.abort()
     if u.path.endswith(("advisor-widget.js","smart-advisor.js")):return route.abort()
     return route.continue_()
+def route_for(key):
+    def handler(route):return demo_guard(route,key)
+    return handler
+
 def clean_demo(page,key):
     if not allowed(page.url,key):raise RuntimeError("Demo left its exact allowlist")
     page.add_style_tag(content=r.HIDE+",.ds-demo-close,[aria-label='AI tanácsadó segítséget ajánl fel']{display:none!important;visibility:hidden!important;pointer-events:none!important}")
@@ -87,7 +91,7 @@ def capture(topic,out):
                 contexts.append(ctx)
                 page=ctx.new_page()
                 if key in PATHS:
-                    ctx.route("**/*",lambda route,k=key:demo_guard(route,k))
+                    ctx.route("**/*",route_for(key))
                     page.goto("https://"+HOST+"/demok/"+PATHS[key]+"?skin=dark",wait_until="domcontentloaded",timeout=45000)
                     page.wait_for_timeout(1200);prepare(page,key)
                 else:
