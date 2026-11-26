@@ -44,8 +44,8 @@ jobs:
           step=next(s for s in steps if s["name"].startswith("Execute one"))
           assert step["if"]=="steps.preflight.outputs.execute == 'true'"
           assert step["env"]["DARKLINE_HEYGEN_RATE_CEILING"]=="15"
-          assert step["env"]["DARKLINE_V126_EXPECTED_SLOT"]=="${{ steps.preflight.outputs.slot }}"
-          assert step["env"]["DARKLINE_V126_EXPECTED_DATE"]=="${{ steps.preflight.outputs.day }}"
+          assert step["env"]["DARKLINE_V126_EXPECTED_SLOT"]=="$"+"{{ steps.preflight.outputs.slot }}"
+          assert step["env"]["DARKLINE_V126_EXPECTED_DATE"]=="$"+"{{ steps.preflight.outputs.day }}"
           morning={"status":"V126_MORNING_PREFLIGHT_OK","enabled":True,"slotState":None,"sideEffects":False}
           video={"dailyEnabled":True,"publication":None,"generation":None}
           fallback={"status":"V1265_FALLBACK_PREFLIGHT_OK","enabled":True,"clear":True,"video":None,"generation":None,"prior":None,"image":None,"sideEffects":False}
