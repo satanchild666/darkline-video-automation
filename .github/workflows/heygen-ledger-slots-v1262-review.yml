@@ -1,0 +1,69 @@
+name: Darkline V12.6.2 - persistent ledger and two-slot review
+on:
+  push:
+    branches: ['dev/v12.5.1-moss-private-review']
+    paths: ['.github/workflows/heygen-ledger-slots-v1262-review.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  policy:
+    if: github.ref == 'refs/heads/dev/v12.5.1-moss-private-review'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: |
+          python video/heygen_budget_v126.py
+          python video/daily_slots_v126.py
+  persistent-test:
+    if: github.ref == 'refs/heads/dev/v12.5.1-moss-private-review'
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compete for one real test-only reservation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PYTHONPATH=video python - <<'PY'
+          import os
+          from concurrent.futures import ThreadPoolExecutor
+          from heygen_budget_v126 import github_test_claim
+          def claim(_):
+              return github_test_claim(os.environ["GITHUB_REPOSITORY"],os.environ["GH_TOKEN"],os.environ["GITHUB_RUN_ID"],os.environ["GITHUB_RUN_ATTEMPT"])
+          with ThreadPoolExecutor(max_workers=4) as pool:r=list(pool.map(claim,range(4)))
+          assert r.count(True)==1,r
+          assert claim(0) is False
+          print("V126_LIVE_LEDGER_RACE_PASS",r,flush=True)
+          PY
+  persistence-read:
+    needs: persistent-test
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify the reservation survived the previous runner
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/contents/test-ledger/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.json?ref=darkline-voice-budget-ledger-test" --jq .content | base64 -d > "$RUNNER_TEMP/record.json"
+          python - <<'PY'
+          import json,os
+          from pathlib import Path
+          r=json.loads((Path(os.environ["RUNNER_TEMP"])/"record.json").read_text())
+          assert r=={"test_only":True,"run":os.environ["GITHUB_RUN_ID"],"attempt":os.environ["GITHUB_RUN_ATTEMPT"],"reserved_micro_usd":0}
+          print("V126_LIVE_LEDGER_PERSISTENCE_PASS independent runner, zero reserved dollars, no production entry")
+          PY
