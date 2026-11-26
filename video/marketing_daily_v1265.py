@@ -66,10 +66,21 @@ def run_fallback(now,env):
     if status!=200 or r.get("status") not in ("V1265_FALLBACK_SCHEDULED","V1265_FALLBACK_EXISTING"):raise RuntimeError("fallback outcome uncertain; inspect Buffer, no retries")
     return r["status"]
 
-def run_extended(now,env):
-    if fallback_window(now):return run_fallback(now,env)
+def current_kind(now):
+    if fallback_window(now):return "fallback"
     slot=base.get_slot(now)
-    if slot is None or slot.number!=2:return base.run_live(now,env)
+    return {1:"morning",2:"video"}.get(slot.number) if slot else None
+
+def dispatch_allowed(now,kind,day):
+    return kind in ("morning","video","fallback") and current_kind(now)==kind and now.astimezone(base.TZ).date().isoformat()==day
+
+def run_extended(now,env):
+    if not base.live_authorized(env):raise RuntimeError("live mode not authorized")
+    kind=env.get("DARKLINE_V126_EXPECTED_SLOT")
+    day=env.get("DARKLINE_V126_EXPECTED_DATE")
+    if not dispatch_allowed(now,kind,day):return "SKIP_CHANGED_WINDOW"
+    if kind=="fallback":return run_fallback(now,env)
+    if kind=="morning":return base.run_live(now,env)
     import catalogue_v1265 as new
     import daily_catalogue_v124 as old
     saved=(old.TOPICS,old.validate_catalogue)
@@ -96,6 +107,14 @@ def selftest():
     try:run_fallback(d,{})
     except RuntimeError:pass
     else:raise AssertionError("unauthorized fallback accepted")
+    assert dispatch_allowed(d,"fallback","2026-12-01")
+    assert not dispatch_allowed(d,"video","2026-12-01")
+    assert not dispatch_allowed(d,"fallback","2026-11-30")
+    assert not dispatch_allowed(d,None,"2026-12-01")
+    assert current_kind(dt.datetime(2026,12,1,8,17,tzinfo=utc))=="morning"
+    assert current_kind(dt.datetime(2026,12,1,12,17,tzinfo=utc))=="video"
+    assert run_extended(d,{"GITHUB_REPOSITORY":base.REPO,"GITHUB_REF":"refs/heads/main","DARKLINE_V126_LIVE_ENABLED":"true","DARKLINE_V126_EXPECTED_SLOT":"video","DARKLINE_V126_EXPECTED_DATE":"2026-12-01"})=="SKIP_CHANGED_WINDOW"
+    print("V1265_DISPATCH_WINDOW_PASS expected slot and date, delayed video cannot become fallback")
     print("V1265_FALLBACK_POLICY_PASS no speech; no retry; reserved/uncertain/scheduled state and public release block image fallback")
 if __name__=="__main__":
     p=argparse.ArgumentParser()
