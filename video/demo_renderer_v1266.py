@@ -40,8 +40,8 @@ def clean_demo(page,key):
     if not allowed(page.url,key):raise RuntimeError("Demo left its exact allowlist")
     page.add_style_tag(content=r.HIDE+",.ds-demo-close,[aria-label='AI tanácsadó segítséget ajánl fel']{display:none!important;visibility:hidden!important;pointer-events:none!important}")
     if page.locator("#dl-stats-consent").is_visible():raise RuntimeError("Consent overlay visible")
-def click_sample(page,selector):
-    loc=page.locator(selector).first
+def click_sample(page,selector,index=0):
+    loc=page.locator(selector).nth(index)
     loc.wait_for(state="visible",timeout=15000)
     # Explicit UI state transitions only. No submit, links or form inputs.
     if not loc.evaluate("""e=>!e.closest('a,form') || (e.tagName==='BUTTON' && e.type==='button' && !e.closest('a'))"""):
@@ -55,7 +55,7 @@ def prepare(page,key):
         click_sample(page,".service-card")
         page.locator(".service-card.active").first.wait_for(state="visible")
         if key=="demo_auto_slots":
-            click_sample(page,".date-btn:nth-child(2)")
+            click_sample(page,".date-btn",1)
             page.locator(".date-btn.active").first.wait_for(state="visible")
             page.locator(".time-btn:not([disabled])").first.wait_for(state="visible")
     elif key=="demo_menu_filter":
@@ -142,7 +142,7 @@ def frame(topic,shots,s,n,edges,caps,en):
         v=a[y0:y1,x0:x1];mask=np.all(v==old,axis=2);v[mask]=rgb
     im=Image.fromarray(a);d=ImageDraw.Draw(im)
     d.rectangle((0,0,1080,12),fill=accent)
-    d.text((40,238),label,font=r.rig.font(25,True),fill=accent)
+    d.text((40,25),label,font=r.rig.font(25,True),fill=accent)
     # Distinct graphic treatments confined to top/right and a small progress strip.
     if family=="auto":
         for i in range(5):d.line((1005+i*12,32,1035+i*12,63),fill=accent,width=3)
