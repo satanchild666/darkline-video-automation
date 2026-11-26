@@ -1,0 +1,76 @@
+name: Darkline V12.6.4 - one bounded paid Turbo canary
+on:
+  push:
+    branches: ['dev/v12.5.1-moss-private-review']
+    paths: ['.github/workflows/heygen-paid-canary-v1264.yml']
+permissions:
+  contents: write
+concurrency:
+  group: darkline-v12-single-publisher
+  cancel-in-progress: false
+jobs:
+  canary:
+    if: github.ref == 'refs/heads/dev/v12.5.1-moss-private-review'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 0578b45ee0c1a75265d53c43558583d6e55976e8
+          path: approved-renderer
+          persist-credentials: false
+      - name: Install minimal audio validation dependency
+        run: python -m pip install -q 'numpy>=1.26,<3'
+      - name: One paid request under production ledger, no retry and no publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEYGEN_API_KEY: ${{ secrets.HEYGEN_API_KEY }}
+          HEYGEN_VOICE_ID: ${{ secrets.HEYGEN_VOICE_ID }}
+        run: |
+          umask 077
+          export PYTHONPATH="$PWD/video:$PWD/approved-renderer/video"
+          python - <<'PY'
+          import datetime as dt, json, os, re, tempfile, wave
+          from pathlib import Path
+          from urllib.request import Request,build_opener,HTTPRedirectHandler
+          from urllib.error import HTTPError,URLError
+          import heygen_budget_v126 as budget
+          from heygen_budget_adapter_v126 import install
+          import heygen_free_voice_v11 as voice
+          now=dt.datetime.now(dt.timezone.utc)
+          if now.date()!=dt.date(2026,11,26):raise RuntimeError("One-time canary date expired; no request")
+          if os.environ.get("GITHUB_REPOSITORY")!="satanchild666/darkline-video-automation":raise RuntimeError("Wrong repo")
+          class NoRedirect(HTTPRedirectHandler):
+              def redirect_request(self,*a,**kw):return None
+          def quota():
+              req=Request("https://api.heygen.com/v2/user/remaining_quota",headers={"X-Api-Key":os.environ["HEYGEN_API_KEY"],"Accept":"application/json"})
+              with build_opener(NoRedirect()).open(req,timeout=30) as r:d=json.loads(r.read(16384))
+              q=d.get("data") or {}
+              n=q.get("remaining_quota")
+              if type(n) not in (int,float) or n<=0:raise RuntimeError("Cannot verify positive API quota")
+              def numeric(o):
+                  if isinstance(o,dict):return {k:numeric(v) for k,v in o.items() if isinstance(v,(dict,int,float)) and not isinstance(v,bool) and re.fullmatch(r"[a-zA-Z_]{1,60}",k)}
+                  return o
+              return {"remaining_quota":n,"details_numeric":numeric(q.get("details",{}))}
+          before=quota();print("V1264_CANARY_QUOTA_BEFORE",json.dumps(before),flush=True)
+          def claim(key,record):return budget.github_claim(os.environ["GITHUB_REPOSITORY"],"darkline-voice-budget-ledger",os.environ["GH_TOKEN"],key,record)
+          # Explicit bounded production-model probe prior to the free promotion cutoff.
+          # All ordinary jobs continue using the original cutoff.
+          old=budget.FREE_UNTIL
+          try:
+              budget.FREE_UNTIL=dt.datetime.min.replace(tzinfo=dt.timezone.utc)
+              with tempfile.TemporaryDirectory() as d:
+                  p=Path(d)/"canary.wav"
+                  with install(voice,1,claim,lambda:dt.datetime.now(dt.timezone.utc),True,True):
+                      text="Szia! Ismerd meg a Darkline Studio digitális megoldásait."
+                      result=voice.speech(text,voice.PROFILES["natural"],p)
+                      with wave.open(str(p),"rb") as w:duration=w.getnframes()/w.getframerate()
+                      assert 1<duration<20
+                      voice.timing([text],result,duration)
+                      print("V1264_PAID_CANARY_PASS",json.dumps({"model":budget.MODEL,"duration":duration,"utf8_bytes":len(text.encode("utf8")),"reserved_usd":0.015,"publication":False,"generation":True}),flush=True)
+          finally:budget.FREE_UNTIL=old
+          print("V1264_CANARY_QUOTA_AFTER",json.dumps(quota()),flush=True)
+          PY
