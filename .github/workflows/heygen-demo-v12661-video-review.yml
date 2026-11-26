@@ -1,0 +1,100 @@
+name: Darkline V12.6.6.1 - one encrypted HeyGen demo video review
+on:
+  push:
+    branches: ['dev/v12.5.1-moss-private-review']
+    paths: ['.github/workflows/heygen-demo-v12661-video-review.yml']
+permissions:
+  contents: read
+concurrency:
+  group: darkline-v12-single-publisher
+  cancel-in-progress: false
+jobs:
+  review:
+    if: github.ref == 'refs/heads/dev/v12.5.1-moss-private-review'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: cceb9074e9269249a519044ab0b06a89e474bfb1
+          path: integration
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 0578b45ee0c1a75265d53c43558583d6e55976e8
+          path: approved-renderer
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install original video renderer dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-dejavu-core
+          python -m pip install -q 'Pillow>=11,<13' 'numpy>=1.26,<3' playwright cryptography
+          python -m playwright install --with-deps chromium
+      - name: Render exactly one review with pre-capture and durable budget, no publishing
+        working-directory: approved-renderer
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEYGEN_API_KEY: ${{ secrets.HEYGEN_API_KEY }}
+          HEYGEN_VOICE_ID: ${{ secrets.HEYGEN_VOICE_ID }}
+        run: |
+          umask 077
+          export PYTHONPATH="$GITHUB_WORKSPACE/integration/video:$PWD/video"
+          python - <<'PY'
+          import datetime as dt, json, os, zipfile, io, subprocess
+          from pathlib import Path
+          from cryptography.hazmat.primitives import serialization
+          import heygen_budget_v126 as budget
+          from heygen_budget_adapter_v126 import install
+          import demo_topics_v1266 as cat
+          import demo_renderer_v1266 as demo
+          import focused_renderer_v124 as render
+          import heygen_free_voice_v11 as voice
+          import private_review_v111 as seal
+          from marketing_daily_v1263 import price_authorized
+          now=dt.datetime.now(dt.timezone.utc)
+          if now.date()!=dt.date(2026,11,26):raise RuntimeError("One-time review date expired; no request")
+          if os.environ.get("GITHUB_REPOSITORY")!="satanchild666/darkline-video-automation":raise RuntimeError("Wrong repo")
+          assert price_authorized(now,{"DARKLINE_HEYGEN_PRICE_CHECKED_UTC":"2026-11-26","DARKLINE_HEYGEN_RATE_CEILING":"15"})
+          budget.selftest()
+          cat.validate_catalogue()
+          demo.selftest()
+          topic=next(t for t in cat.NEW if t.key=="web_services")
+          def claim(key,record):
+              ok=budget.github_claim(os.environ["GITHUB_REPOSITORY"],"darkline-voice-budget-ledger",os.environ["GH_TOKEN"],key,record)
+              print("V12661_REVIEW_RESERVATION",json.dumps({"accepted":ok,"date":record["date"],"slot":record["slot"],"reserved_micro_usd":record["reserved_micro_usd"],"model":record["model"],"bytes":record["bytes"]}),flush=True)
+              return ok
+          out=Path("private-preview-v12661")
+          # The production renderer captures before calling voice.speech.
+          # Free promotional Turbo remains preferred until its existing cutoff.
+          with install(voice,2,claim,lambda:dt.datetime.now(dt.timezone.utc),True,True):
+              with demo.install():
+                  movie,q,fp=render.generate(topic,out)
+              q.update({"review_only":True,"publication":False,"owner_approved":False,"style":cat.META[topic.key]["style"],"reserved_usd":0.015})
+              (out/"quality.json").write_text(json.dumps(q,ensure_ascii=False,indent=2))
+              archive=io.BytesIO()
+              with zipfile.ZipFile(archive,"w",zipfile.ZIP_DEFLATED) as z:
+                  for name in ("daily.mp4","quality.json","storyboard.jpg","captions.srt","narration_timing.json","capture_report.json","voice_provenance.json","fingerprint.json","private_voice.wav"):
+                      p=out/name
+                      if p.is_file():z.write(p,arcname=name)
+              pub=serialization.load_pem_public_key("-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAygJUGhMWRMDELGMY34BA\n0GfDwDjj9rx9PT3KTBXwiXjzxU+u1aCtFEe0eZC4yzp4tw/DjccsMLLF/cmxTgHD\nTMXYhgV1Y0EmilVR9Sz0j9UQG2Zj3SIoIQ12c6HpzykvSzq9Zxr3hwQJTBZk21sF\nHTNOBfSZ4Wkwze5AM8sWH8cHcjB2N4AWYvsx1Cl54R5Wt1V0hfqQk4NNQ/00TR5W\nKqPGAd553fzTdWsOf8nr1Ew0VvDQZ59JrC9mGldH1D5s76AMVItspyLmPFgzumuj\nZN5n2KCHmmp8M5K3UrFat8d6Uc0g8AEZkQAsvWxXgRSQjYRhYCCs4AiDH/i/K9xA\nCwIDAQAB\n-----END PUBLIC KEY-----\n".encode())
+              dst=Path("sealed-review-v12661");dst.mkdir(exist_ok=True)
+              (dst/"Darkline_V12661_review.dlenc").write_bytes(seal.seal(archive.getvalue(),pub))
+              print("V12661_VIDEO_REVIEW_RESULT",json.dumps(q,ensure_ascii=False),flush=True)
+              if q["review_gate"]!="PASS" or q["reasons"]:raise RuntimeError("Review quality gate rejected, encrypted artifact retained")
+          PY
+      - name: Upload encrypted review only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Darkline-V12661-ENCRYPTED-VIDEO-REVIEW
+          path: approved-renderer/sealed-review-v12661/*.dlenc
+          retention-days: 7
+          if-no-files-found: ignore
+      - name: Remove private files from runner
+        if: always()
+        run: rm -rf approved-renderer/private-preview-v12661 approved-renderer/sealed-review-v12661 approved-renderer/creative-preview-v10
