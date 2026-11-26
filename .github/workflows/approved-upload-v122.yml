@@ -1,0 +1,33 @@
+name: Darkline V12.2 approved first video upload
+on:
+  push:
+    branches: [dev/video-dedup-v1]
+    paths: ['.github/workflows/approved-upload-v122.yml']
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: darkline-v12-single-publisher
+  cancel-in-progress: false
+jobs:
+  approved-upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install transfer and verification tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          python -m pip install -q cryptography
+          python -m py_compile video/approved_upload_v122.py
+          node video/video_publish_gate_v12.test.mjs
+      - name: Verify owner-approved bytes and schedule Facebook video through Buffer
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DARKLINE_TEST_TOKEN: ${{ secrets.DARKLINE_TEST_TOKEN }}
+        run: |
+          umask 077
+          python video/approved_upload_v122.py
