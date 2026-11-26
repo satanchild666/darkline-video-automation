@@ -1,0 +1,84 @@
+name: Darkline V12.6.5 - expanded catalogue and safe image fallback
+on:
+  push:
+    branches: ['dev/v12.5.1-moss-private-review']
+    paths: ['.github/workflows/marketing-v1265-review.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  policy:
+    if: github.ref == 'refs/heads/dev/v12.5.1-moss-private-review'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 0578b45ee0c1a75265d53c43558583d6e55976e8
+          path: approved-renderer
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate exact captions, distinct scripts and budget bounds
+        run: |
+          python -m pip install -q 'numpy>=1.26,<3' 'Pillow>=11,<13'
+          export PYTHONPATH="$PWD/video:$PWD/approved-renderer/video"
+          python video/heygen_budget_v126.py
+          python video/marketing_daily_v1265.py --selftest
+          python video/catalogue_v1265.py
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from catalogue_v1265 import manifest
+          assert manifest()==json.loads(Path("video/catalogue_v1265_captions.json").read_text())
+          print("V1265_CAPTION_MANIFEST_PASS exact Python/Worker agreement")
+          PY
+          node --check video/worker_v1265_patch.mjs
+          node video/worker_v1265_fallback.test.mjs
+          node approved-renderer/video/video_publish_gate_v12.test.mjs
+  public-capture:
+    needs: policy
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [0,1,2,3]
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 0578b45ee0c1a75265d53c43558583d6e55976e8
+          path: approved-renderer
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install original public capture renderer
+        run: |
+          python -m pip install -q 'numpy>=1.26,<3' 'Pillow>=11,<13' playwright cryptography
+          python -m playwright install --with-deps chromium
+      - name: Capture three actual public storyboards; no narration or publication
+        env:
+          GROUP: ${{ matrix.group }}
+        run: |
+          export PYTHONPATH="$PWD/video:$PWD/approved-renderer/video"
+          python - <<'PY'
+          import os,tempfile
+          from pathlib import Path
+          import catalogue_v1265 as cat
+          import focused_renderer_v124 as render
+          group=int(os.environ["GROUP"])
+          for topic in cat.NEW[group*3:group*3+3]:
+              with tempfile.TemporaryDirectory() as d:
+                  shots,audit=render.capture(topic,Path(d))
+                  assert len(shots)==len(audit)==10
+                  assert min(x["minimum_projected_px"] for x in audit)>=32
+                  print("V1265_CAPTURE_PASS",topic.key,len(audit),min(x["minimum_projected_px"] for x in audit),flush=True)
+          PY
