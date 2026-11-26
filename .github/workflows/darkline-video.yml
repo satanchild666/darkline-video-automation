@@ -1,4 +1,4 @@
-name: Darkline Studio - daily AI promotional video
+name: Darkline Studio - V12.4 daily promotional video
 on:
   schedule:
     - cron: '17 13 * * *'
@@ -7,33 +7,55 @@ on:
 permissions:
   contents: write
 concurrency:
-  group: darkline-daily-video
+  group: darkline-v12-single-publisher
   cancel-in-progress: false
 jobs:
   video:
+    # Schedule runs on default branch only; manual execution elsewhere is blocked.
+    if: github.ref == 'refs/heads/main' && vars.DARKLINE_HEYGEN_FREE_ENABLED == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Python and video dependencies
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Free voice expiry guard
+        id: free
+        run: |
+          if [ "$(date -u +%s)" -ge "$(date -u -d '2026-12-01 00:00:00' +%s)" ]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "Free narration window expired; no generation or publishing."
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Install render and verification tools
+        if: steps.free.outputs.enabled == 'true'
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq ffmpeg fonts-dejavu-core
-          python -m pip install --disable-pip-version-check 'Pillow>=11,<13' 'numpy>=1.26,<3'
-      - name: Generate, render and save to Buffer drafts
+          python -m pip install -q 'Pillow>=11,<13' 'numpy>=1.26,<3' playwright cryptography
+          python -m playwright install --with-deps chromium
+          node video/video_publish_gate_v12.test.mjs
+          python video/autonomous_daily_v124.py --selftest
+      - name: Select, render, verify and schedule at 16:00 local time
+        if: steps.free.outputs.enabled == 'true'
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           DARKLINE_TEST_TOKEN: ${{ secrets.DARKLINE_TEST_TOKEN }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-        run: python video/publish_automation.py
-      - name: Keep workflow active and note successful run
-        if: success()
+          DARKLINE_HEYGEN_FREE_ENABLED: 'true'
+          HEYGEN_API_KEY: ${{ secrets.HEYGEN_API_KEY }}
+          HEYGEN_VOICE_ID: ${{ secrets.HEYGEN_VOICE_ID }}
         run: |
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git config user.name 'github-actions[bot]'
-          git add last-run.json
-          if ! git diff --cached --quiet; then
-            git commit -m "Video generated for $(date -u +%Y-%m-%d)"
-            git push
-          fi
+          umask 077
+          python video/autonomous_daily_v124.py
+      - name: Encrypted review of generated candidate
+        if: always() && steps.free.outputs.enabled == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Darkline-V12.4-DAILY-ENCRYPTED-REVIEW
+          path: sealed-review-v124/*.dlenc
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Clean raw voice and temporary review material
+        if: always()
+        run: rm -rf private-preview-v124 sealed-review-v124 creative-preview-v10
