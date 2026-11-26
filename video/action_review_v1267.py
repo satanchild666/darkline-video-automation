@@ -2,7 +2,7 @@
 Each clip records real browser pixels before, during and after a safe sample action.
 Static focal text remains measured; no simulated UI, cursor or fake click effects.
 """
-import io,json,math,subprocess
+import io,json,math,subprocess,tempfile,time
 from pathlib import Path
 from PIL import Image,ImageDraw
 from playwright.sync_api import sync_playwright
@@ -37,7 +37,8 @@ def fit(im,w,h):
 def capture_case(browser,case):
     family,key,selector,index,proof,result,title,after=case
     width=1100 if family=="crm" else r.VW
-    ctx=browser.new_context(viewport={"width":width,"height":r.VH},device_scale_factor=2,service_workers="block")
+    tmp=tempfile.TemporaryDirectory()
+    ctx=browser.new_context(viewport={"width":width,"height":r.VH},device_scale_factor=2,service_workers="block",record_video_dir=tmp.name,record_video_size={"width":width,"height":r.VH})
     page=ctx.new_page()
     blocked=[]
     def route_handler(route):
@@ -58,22 +59,34 @@ def capture_case(browser,case):
         before=crop(screenshot(page),box)
         overview=screenshot(page)
         # Actual browser interaction. Mouse input is performed only on allowlisted non-submit controls.
+        action.hover(timeout=10000)
+        started=time.monotonic()
+        page.wait_for_timeout(250)
         demo.click_sample(page,selector,index)
         page.locator(proof).first.wait_for(state="visible",timeout=15000)
-        actual=[]
-        for i in range(8):
-            actual.append(screenshot(page))
-            page.wait_for_timeout(100)
+        page.wait_for_timeout(850)
+        finished=time.monotonic()
         after_state=state(page,proof)
         after_result=state(page,result)
         if not after_state["visible"] or not after_result["visible"]:raise RuntimeError("result missing")
         if before_state==after_state and before_result==after_result:raise RuntimeError("no demonstrated state transition")
         data2,box2=measured(page,page.locator(result).first,key)
         final=crop(screenshot(page),box2)
+        # Finalize the real Playwright recording, then extract the click interval.
+        vid=page.video;closed=time.monotonic();page.close();ctx.close()
+        raw=Path(tmp.name)/"action.webm";vid.save_as(str(raw))
+        dur=float(subprocess.check_output(["ffprobe","-v","error","-show_entries","format=duration","-of","default=nw=1:nk=1",str(raw)]))
+        lo=max(0,dur-(closed-started));hi=min(dur,dur-(closed-finished))
+        if hi-lo<.8:raise RuntimeError("actual browser clip too short")
+        frames=Path(tmp.name)/"frames";frames.mkdir()
+        subprocess.run(["ffmpeg","-v","error","-ss",str(lo),"-t",str(hi-lo),"-i",str(raw),"-vf","fps=15","-q:v","3",str(frames/"%04d.jpg")],check=True)
+        actual=[Image.open(p).convert("RGB") for p in sorted(frames.glob("*.jpg"))]
+        if len(actual)<10:raise RuntimeError("actual browser clip incomplete")
         audit={"family":family,"action":selector,"result":result,"before_px":round(data["projected"],2),"after_px":round(data2["projected"],2),
-               "state_changed":True,"network_mutations_blocked":len(blocked),"real_browser_frames":len(actual)+3,"publication":False,"narration":False}
+               "state_changed":True,"network_mutations_blocked":len(blocked),"real_browser_frames":len(actual),"recorded_action_seconds":round(hi-lo,3),"publication":False,"narration":False}
         return before,overview,actual,final,audit
-    finally:ctx.close()
+    finally:
+        ctx.close();tmp.cleanup()
 
 def composition(case,im,phase,n):
     family,key,selector,index,proof,result,title,after=case
@@ -109,7 +122,7 @@ def clip(case,assets,out):
         for n in range(180):
             if n<45:im,phase=before,"before"
             elif n<60:im,phase=overview,"action"
-            elif n<108:im,phase=actual[min(7,(n-60)//6)],"action"
+            elif n<108:im,phase=actual[min(len(actual)-1,int((n-60)*len(actual)/48))],"action"
             else:im,phase=final,"result"
             proc.stdin.write(composition(case,im,phase,n).tobytes())
     finally:proc.stdin.close()
