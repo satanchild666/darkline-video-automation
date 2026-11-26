@@ -66,7 +66,7 @@ jobs:
           from pathlib import Path
           from huggingface_hub import HfApi,snapshot_download
           repo="Systran/faster-whisper-small"
-          revision=HfApi().model_info(repo).sha
+          revision="536b0662742c02347bc0e980a01041f333bce120"
           root=Path(os.environ["RUNNER_TEMP"])/"zonos"/"asr"
           snapshot_download(repo_id=repo,revision=revision,local_dir=root,allow_patterns=["config.json","model.bin","tokenizer.json","vocabulary.*","preprocessor_config.json"])
           (root/"revision.txt").write_text(revision)
@@ -128,6 +128,10 @@ jobs:
           from faster_whisper import WhisperModel
           import unicodedata
           asr=WhisperModel(str(z/"asr"),device="cpu",compute_type="int8",cpu_threads=2,local_files_only=True)
+          # Verify the NumPy input path before generating any private audio.
+          probe,_=asr.transcribe(np.zeros(16000,dtype=np.float32),language="hu",beam_size=1,temperature=0,condition_on_previous_text=False,vad_filter=False)
+          list(probe)
+          print("V1256_PCM_PREFLIGHT_PASS",flush=True)
           def words(s):
               # Preserve Hungarian accents and word content; ignore case and punctuation only.
               s=unicodedata.normalize("NFC",s).casefold()
@@ -158,7 +162,9 @@ jobs:
                       a=np.frombuffer(subprocess.check_output(["ffmpeg","-v","error","-i",str(wav),"-ac","1","-ar",str(sr),"-f","f32le","-"]),dtype="<f4").copy()
                       peak=float(np.max(np.abs(a)));rms=float(np.sqrt(np.mean(a*a)))
                       if not 1<=len(a)/sr<=18.6 or not np.isfinite(a).all() or not .005<peak<.999 or rms<.003:raise RuntimeError("invalid waveform")
-                      segs,_=asr.transcribe(str(wav),language="hu",beam_size=5,temperature=0,condition_on_previous_text=False,vad_filter=False,word_timestamps=True)
+                      pcm16=np.frombuffer(subprocess.check_output(["ffmpeg","-v","error","-i",str(wav),"-ac","1","-ar","16000","-f","f32le","-"]),dtype="<f4").copy()
+                      if not len(pcm16) or not np.isfinite(pcm16).all():raise RuntimeError("invalid ASR PCM")
+                      segs,_=asr.transcribe(pcm16,language="hu",beam_size=5,temperature=0,condition_on_previous_text=False,vad_filter=False,word_timestamps=True)
                       segs=list(segs);heard=" ".join(s.text.strip() for s in segs);actual=words(heard)
                       wer=edit(expected,actual)/len(expected)
                       stamps=[w for s in segs for w in (s.words or []) if w.end>w.start]
