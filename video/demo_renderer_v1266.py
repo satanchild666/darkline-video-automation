@@ -68,16 +68,20 @@ def prepare(page,key):
     elif key=="demo_salon_staff":
         click_sample(page,"#service-list .service-card")
         page.locator("#staff-list").wait_for(state="visible")
-    elif key.endswith("_admin") or key in ("demo_crm_board","demo_crm_detail"):
-        if not page.locator("#ds-v23-panel").is_visible() or (key in ("demo_crm_board","demo_crm_detail") and not page.locator("#crm-board").is_visible()):
+    elif key in ("demo_crm_board","demo_crm_detail"):
+        # In CRM the native board and generic editor are mutually exclusive.
+        # Wait for the actual board, not the generic panel.
+        if not page.locator("#crm-board").is_visible():
             click_sample(page,"#ds-v23-owner")
-        page.locator("#ds-v23-panel").wait_for(state="visible")
-        if key in ("demo_crm_board","demo_crm_detail"):
-            page.locator("#crm-board").wait_for(state="visible",timeout=15000)
+        page.locator("#crm-board").wait_for(state="visible",timeout=15000)
         if key=="demo_crm_detail":
-            # Only the public built-in sample card, never external customer data.
+            # Public built-in sample card only, no write.
             click_sample(page,'.crm-card[data-crm-id="105"]')
             page.locator('.crm-card[data-crm-id="105"][aria-pressed="true"]').wait_for(state="visible")
+    elif key.endswith("_admin"):
+        if not page.locator("#ds-v23-panel").is_visible():
+            click_sample(page,"#ds-v23-owner")
+        page.locator("#ds-v23-panel").wait_for(state="visible",timeout=15000)
     clean_demo(page,key)
 def demo_focus(page,loc,ordinal,key):
     loc.wait_for(state="visible",timeout=20000)
