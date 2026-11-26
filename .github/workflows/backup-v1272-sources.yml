@@ -83,4 +83,5 @@ jobs:
         with:
           name: Darkline-V1272-SAFE-SOURCE-SNAPSHOTS
           path: source-archive/
+          include-hidden-files: true
           retention-days: 7
