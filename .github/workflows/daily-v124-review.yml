@@ -24,6 +24,8 @@ jobs:
           python -m pip install -q 'Pillow>=11,<13' 'numpy>=1.26,<3' playwright cryptography
           python -m playwright install --with-deps chromium
           node --check video/worker_daily_v124.mjs
+          node --check video/video_editorial_core_v1241.mjs
+          node --input-type=module -e 'import {videoEditorialCore as f} from "./video/video_editorial_core_v1241.mjs"; import assert from "node:assert/strict"; const s="Valódi időpontválasztás. "; assert.equal(f(s+"Darkline Studio https://darkline-studio.web.app/ #DarklineStudio Animált kabala, AI-narráció.",x=>x),s.trim()); console.log("V1241_EDITORIAL_TEST_OK")'
           node video/video_publish_gate_v12.test.mjs
           python video/content_selection_v123_test.py
           python video/autonomous_daily_v124.py --selftest
