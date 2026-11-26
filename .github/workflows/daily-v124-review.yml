@@ -1,0 +1,50 @@
+name: Darkline V12.4 autonomous daily private QA
+on:
+  push:
+    branches: [dev/video-dedup-v1]
+    paths: ['.github/workflows/daily-v124-review.yml']
+permissions:
+  contents: read
+concurrency:
+  group: darkline-v12-single-publisher
+  cancel-in-progress: false
+jobs:
+  daily-qa:
+    if: vars.DARKLINE_HEYGEN_FREE_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install and validate
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-dejavu-core
+          python -m pip install -q 'Pillow>=11,<13' 'numpy>=1.26,<3' playwright cryptography
+          python -m playwright install --with-deps chromium
+          node --check video/worker_daily_v124.mjs
+          node video/video_publish_gate_v12.test.mjs
+          python video/content_selection_v123_test.py
+          python video/autonomous_daily_v124.py --selftest
+      - name: Real topic discovery and new focused video (no publication)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DARKLINE_TEST_TOKEN: ${{ secrets.DARKLINE_TEST_TOKEN }}
+          DARKLINE_HEYGEN_FREE_ENABLED: 'true'
+          HEYGEN_API_KEY: ${{ secrets.HEYGEN_API_KEY }}
+          HEYGEN_VOICE_ID: ${{ secrets.HEYGEN_VOICE_ID }}
+        run: |
+          umask 077
+          python video/autonomous_daily_v124.py --review
+      - name: Upload encrypted owner review only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Darkline-V12.4-ENCRYPTED-REVIEW
+          path: sealed-review-v124/*.dlenc
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Clean private files
+        if: always()
+        run: rm -rf private-preview-v124 sealed-review-v124 creative-preview-v10
