@@ -15,11 +15,21 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - name: Checkout the exact approved renderer separately
+        uses: actions/checkout@v4
+        with:
+          ref: 0578b45ee0c1a75265d53c43558583d6e55976e8
+          path: approved-renderer
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - name: Run budget and fail-closed tests without any paid API or publication
         run: python video/heygen_budget_v126.py
+      - name: Verify approved HeyGen adapter integration using mock speech only
+        run: |
+          python -m pip install -q 'numpy>=1.26,<3'
+          PYTHONPATH="$PWD/video:$PWD/approved-renderer/video" python video/heygen_budget_adapter_v126.py
       - name: Verify actual reviewed catalogue and model compatibility without credentials
         run: |
           python - <<'PY'
@@ -27,7 +37,7 @@ jobs:
           from pathlib import Path
           sys.path.insert(0,"video")
           from heygen_budget_v126 import MAX_BYTES
-          tree=ast.parse(Path("video/daily_catalogue_v124.py").read_text())
+          tree=ast.parse(Path("approved-renderer/video/daily_catalogue_v124.py").read_text())
           count=0
           for n in ast.walk(tree):
               if isinstance(n,ast.Call) and isinstance(n.func,ast.Name) and n.func.id=="Topic" and len(n.args)>=3:
