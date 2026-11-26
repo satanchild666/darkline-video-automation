@@ -1,0 +1,38 @@
+name: Darkline V11.5 clean flagship capture
+on:
+  push:
+    branches: [dev/video-dedup-v1]
+    paths: ['video/flagship_clean_capture_v115.py','.github/workflows/flagship-clean-capture-v115.yml']
+permissions:
+  contents: read
+concurrency:
+  group: darkline-v115-capture
+  cancel-in-progress: false
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install capture environment
+        run: |
+          python -m pip install -q Pillow numpy playwright cryptography
+          python -m playwright install --with-deps chromium
+      - name: Capture public website, no consent overlay, no voice calls
+        run: |
+          umask 077
+          python -m py_compile video/flagship_clean_capture_v115.py
+          python video/flagship_clean_capture_v115.py
+      - name: Upload ciphertext only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Darkline-V11.5-CLEAN-CAPTURE
+          path: sealed-review-v115/*.dlenc
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Clean plaintext
+        if: always()
+        run: rm -rf private-preview-v115 sealed-review-v115
