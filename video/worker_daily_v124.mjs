@@ -13,7 +13,7 @@ async function dailyVideoV124(request,env,url){
       return json({status:"V124_STATE_OK",dailyEnabled:enabled,publication:previous?.state||null,generation:generation?.state||null,sideEffects:false});
     }
     if(!Object.prototype.hasOwnProperty.call(V124_CAPTIONS,body.topic))throw Error("Unknown topic");
-    const helpers=makeVideoHelpers({bufferGraphql,findDarklineFacebookChannel,budapestTime,dsPostSemanticGuard,dsPostNorm,dsPostCore,dsPostSimilarity});
+    const helpers=videoEditorialHelpers(makeVideoHelpers({bufferGraphql,findDarklineFacebookChannel,budapestTime,dsPostSemanticGuard,dsPostNorm,dsPostCore,dsPostSimilarity}),{dsPostCore,dsPostNorm,dsPostSimilarity,dsPostSemanticGuard});
     if(url.pathname==="/video-v124-topic"){
       if(body.caption!==V124_CAPTIONS[body.topic])throw Error("Unexpected caption");
       const channel=await helpers.findChannel(env);
