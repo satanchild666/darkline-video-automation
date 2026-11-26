@@ -1,0 +1,73 @@
+name: Darkline V12.6.8 - full viewport action visual review
+on:
+  push:
+    branches: ['dev/v12.5.1-moss-private-review']
+    paths: ['.github/workflows/action-v1268-review.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  action-review:
+    if: github.ref == 'refs/heads/dev/v12.5.1-moss-private-review'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 0578b45ee0c1a75265d53c43558583d6e55976e8
+          path: approved-renderer
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-dejavu-core
+          python -m pip install -q 'Pillow>=11,<13' 'numpy>=1.26,<3' playwright cryptography
+          python -m playwright install --with-deps chromium
+      - name: Record actual demo actions, no credentials or speech
+        run: |
+          umask 077
+          export PYTHONPATH="$PWD/video:$PWD/approved-renderer/video"
+          python video/heygen_budget_v126.py
+          python video/demo_renderer_v1266.py
+          python video/action_review_v1268.py --out private-action-review
+      - name: Seal visual samples and report even if one case fails
+        if: always()
+        run: |
+          umask 077
+          export PYTHONPATH="$PWD/video:$PWD/approved-renderer/video"
+          python - <<'PY'
+          from pathlib import Path
+          import zipfile,io,json,subprocess
+          from cryptography.hazmat.primitives import serialization
+          import private_review_v111 as seal
+          p=Path("private-action-review")
+          if not p.is_dir():raise RuntimeError("No review output")
+          videos=[p/(k+".mp4") for k in ("auto","menu","salon","crm","web") if (p/(k+".mp4")).is_file() and (p/(k+".json")).is_file()]
+          if videos:
+              listing=p/"concat.txt"
+              listing.write_text("".join("file '"+x.name+"'\n" for x in videos))
+              subprocess.run(["ffmpeg","-v","error","-y","-f","concat","-safe","1","-i",str(listing),"-c","copy","-movflags","+faststart",str(p/"V1268_visual_preview.mp4")],check=True)
+              listing.unlink()
+          buf=io.BytesIO()
+          with zipfile.ZipFile(buf,"w",zipfile.ZIP_DEFLATED) as z:
+              for f in p.iterdir():
+                  if f.suffix in (".mp4",".json") and (f.suffix!=".mp4" or f.stem=="V1268_visual_preview" or f in videos):z.write(f,arcname=f.name)
+          pub=serialization.load_pem_public_key("-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAygJUGhMWRMDELGMY34BA\n0GfDwDjj9rx9PT3KTBXwiXjzxU+u1aCtFEe0eZC4yzp4tw/DjccsMLLF/cmxTgHD\nTMXYhgV1Y0EmilVR9Sz0j9UQG2Zj3SIoIQ12c6HpzykvSzq9Zxr3hwQJTBZk21sF\nHTNOBfSZ4Wkwze5AM8sWH8cHcjB2N4AWYvsx1Cl54R5Wt1V0hfqQk4NNQ/00TR5W\nKqPGAd553fzTdWsOf8nr1Ew0VvDQZ59JrC9mGldH1D5s76AMVItspyLmPFgzumuj\nZN5n2KCHmmp8M5K3UrFat8d6Uc0g8AEZkQAsvWxXgRSQjYRhYCCs4AiDH/i/K9xA\nCwIDAQAB\n-----END PUBLIC KEY-----\n".encode())
+          dst=Path("sealed-action-review");dst.mkdir(exist_ok=True)
+          (dst/"V1268_action_review.dlenc").write_bytes(seal.seal(buf.getvalue(),pub))
+          print("V1268_ACTION_PACKAGE",len(videos),"verified visual samples; no audio or publish",flush=True)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Darkline-V1268-ENCRYPTED-ACTION-REVIEW
+          path: sealed-action-review/*.dlenc
+          retention-days: 7
+          if-no-files-found: ignore
+      - if: always()
+        run: rm -rf private-action-review sealed-action-review
