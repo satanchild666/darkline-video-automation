@@ -1,4 +1,4 @@
-name: Darkline V12.4.3 verified focal geometry private QA
+name: Darkline V12.4.4 adaptive readable focal capture QA
 on:
   push:
     branches: [dev/video-dedup-v1]
