@@ -1,0 +1,40 @@
+name: Darkline V12.6 - HeyGen monthly budget and two-slot review
+on:
+  push:
+    branches: ['dev/v12.5.1-moss-private-review']
+    paths: ['.github/workflows/heygen-budget-v126-review.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  budget-review:
+    if: github.ref == 'refs/heads/dev/v12.5.1-moss-private-review'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run budget and fail-closed tests without any paid API or publication
+        run: python video/heygen_budget_v126.py
+      - name: Verify actual reviewed catalogue and model compatibility without credentials
+        run: |
+          python - <<'PY'
+          import ast,sys
+          from pathlib import Path
+          sys.path.insert(0,"video")
+          from heygen_budget_v126 import MAX_BYTES
+          tree=ast.parse(Path("video/daily_catalogue_v124.py").read_text())
+          count=0
+          for n in ast.walk(tree):
+              if isinstance(n,ast.Call) and isinstance(n.func,ast.Name) and n.func.id=="Topic" and len(n.args)>=3:
+                  scenes=ast.literal_eval(n.args[2]);key=ast.literal_eval(n.args[0])
+                  text=" ".join(s[3] for s in scenes)
+                  size=len(text.encode("utf8"))
+                  print("V126_CATALOGUE",key,len(scenes),len(text),size,"PASS" if size<=MAX_BYTES else "NEEDS_SHORTER_COPY")
+                  count+=1
+          assert count>0
+          PY
