@@ -1,4 +1,4 @@
-name: Darkline V12.6.6 - 51 topics and real demo capture review
+name: Darkline V12.6.6.1 - corrected demo focus review
 on:
   push:
     branches: ['dev/v12.5.1-moss-private-review']
@@ -91,8 +91,7 @@ jobs:
               except Exception as e:
                   failed.append(topic.key)
                   print("V1266_TOPIC_CAPTURE_FAIL",topic.key,str(e)[:800],flush=True)
-                  # Stop this family on first failing capture to avoid repeatedly
-                  # hitting the public site with an identical broken selector.
+                  # Stop this family on first failing capture; preserve original gate.
                   break
           assert not failed,failed
           PY
