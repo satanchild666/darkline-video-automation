@@ -1,6 +1,8 @@
-name: Darkline Studio - V12.5 autonomous daily video
+name: Darkline Studio - V12.6.4 budgeted daily marketing
 on:
   schedule:
+    - cron: '17 9 * * *'
+      timezone: 'Europe/Budapest'
     - cron: '17 13 * * *'
       timezone: 'Europe/Budapest'
   workflow_dispatch:
@@ -8,46 +10,62 @@ on:
     branches: [main]
     paths: ['.github/workflows/darkline-video.yml']
 permissions:
-  contents: write
+  contents: read
 concurrency:
   group: darkline-v12-single-publisher
   cancel-in-progress: false
 jobs:
-  video:
+  marketing:
     if: github.ref == 'refs/heads/main' && vars.DARKLINE_HEYGEN_FREE_ENABLED == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    permissions:
+      contents: write
     steps:
-      - name: Read-only state and free voice safety preflight
+      - name: Checkout tested budget and slot controller
+        uses: actions/checkout@v4
+        with:
+          ref: 52314847eb6c24dda1c6f6864607c3aba9f0d2a6
+          path: integration
+          persist-credentials: false
+      - name: Checkout exact owner-approved visual renderer
+        uses: actions/checkout@v4
+        with:
+          ref: 0578b45ee0c1a75265d53c43558583d6e55976e8
+          path: approved-renderer
+          persist-credentials: false
+      - name: Validate runtime window and live state without side effects
         id: preflight
         env:
           DARKLINE_TEST_TOKEN: ${{ secrets.DARKLINE_TEST_TOKEN }}
         run: |
+          export PYTHONPATH="$GITHUB_WORKSPACE/integration/video:$GITHUB_WORKSPACE/approved-renderer/video"
+          python integration/video/heygen_budget_v126.py
+          python integration/video/daily_slots_v126.py
+          python integration/video/marketing_daily_v1263.py --selftest
           python - <<'PY'
-          import datetime,json,os
-          from zoneinfo import ZoneInfo
-          from urllib.request import Request,build_opener,HTTPRedirectHandler
-          class NoRedirect(HTTPRedirectHandler):
-              def redirect_request(self,*a,**kw):return None
-          now=datetime.datetime.now(ZoneInfo("Europe/Budapest"))
-          token=os.environ.get("DARKLINE_TEST_TOKEN","")
-          if len(token)<32:raise RuntimeError("Missing auth")
-          req=Request("https://darkline-ai-growth.marksz0430.workers.dev/video-v124-state",data=json.dumps({"date":now.date().isoformat()}).encode(),headers={"Content-Type":"application/json","x-darkline-video-token":token,"User-Agent":"DarklineStudioVideoAutomation/1.0 (GitHub Actions)"},method="POST")
-          with build_opener(NoRedirect()).open(req,timeout=30) as r:state=json.loads(r.read(16384))
-          if state.get("status")!="V124_STATE_OK" or state.get("dailyEnabled") is not True or state.get("sideEffects") is not False:raise RuntimeError("Daily gate unavailable")
-          print("V125_LIVE_DAILY_STATE",json.dumps(state),flush=True)
-          enabled=not state.get("publication") and not state.get("generation") and now.hour<15 and now.astimezone(datetime.timezone.utc)<datetime.datetime(2026,12,1,tzinfo=datetime.timezone.utc)
-          with open(os.environ["GITHUB_OUTPUT"],"a") as f:f.write("enabled="+str(enabled).lower()+"\n")
-          if not enabled:print("V125_SKIP_ALREADY_ATTEMPTED_LATE_OR_EXPIRED")
+          import datetime as dt, json, os
+          from marketing_daily_v1263 import get_slot,preflight,worker,TZ
+          now=dt.datetime.now(dt.timezone.utc)
+          slot=get_slot(now)
+          day=now.astimezone(TZ).date().isoformat()
+          token=os.environ["DARKLINE_TEST_TOKEN"]
+          assert len(token)>=32
+          status,m=worker("/posts-v126-morning",{"date":day,"dryRun":True},token)
+          if status!=200 or m.get("status")!="V126_MORNING_PREFLIGHT_OK" or m.get("sideEffects") is not False:raise RuntimeError("Morning read-only gate unavailable")
+          v=preflight(now,token)
+          print("V1264_PRODUCTION_PREFLIGHT",json.dumps({"morning":m,"video":v,"event":os.environ["GITHUB_EVENT_NAME"]}),flush=True)
+          # A push can NEVER generate, reserve, or publish.
+          execute=os.environ["GITHUB_EVENT_NAME"] in ("schedule","workflow_dispatch") and slot is not None
+          if slot and slot.number==1:execute=execute and m.get("enabled") is True and not m.get("slotState")
+          if slot and slot.number==2:execute=execute and v.get("dailyEnabled") is True and not v.get("publication") and not v.get("generation")
+          with open(os.environ["GITHUB_OUTPUT"],"a") as f:
+              f.write("execute="+str(bool(execute)).lower()+"\n")
+              f.write("slot="+str(slot.number if slot else 0)+"\n")
           PY
-      - name: Checkout exact owner-approved V12.4.4 renderer
-        if: steps.preflight.outputs.enabled == 'true'
-        uses: actions/checkout@v4
-        with:
-          ref: 0578b45ee0c1a75265d53c43558583d6e55976e8
-          persist-credentials: false
-      - name: Install render and verification tools
-        if: steps.preflight.outputs.enabled == 'true'
+      - name: Install exact approved video dependencies only for afternoon
+        if: steps.preflight.outputs.execute == 'true' && steps.preflight.outputs.slot == '2'
+        working-directory: approved-renderer
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq ffmpeg fonts-dejavu-core
@@ -55,25 +73,31 @@ jobs:
           python -m playwright install --with-deps chromium
           node video/video_publish_gate_v12.test.mjs
           python video/autonomous_daily_v124.py --selftest
-      - name: Select, render, verify and schedule at 16:00 local time
-        if: steps.preflight.outputs.enabled == 'true'
+          PYTHONPATH="$GITHUB_WORKSPACE/integration/video:$PWD/video" python "$GITHUB_WORKSPACE/integration/video/heygen_budget_adapter_v126.py"
+      - name: Execute one authorized slot with guarded narration and no retries
+        if: steps.preflight.outputs.execute == 'true'
+        working-directory: approved-renderer
         env:
           GH_TOKEN: ${{ github.token }}
           DARKLINE_TEST_TOKEN: ${{ secrets.DARKLINE_TEST_TOKEN }}
-          DARKLINE_HEYGEN_FREE_ENABLED: 'true'
           HEYGEN_API_KEY: ${{ secrets.HEYGEN_API_KEY }}
           HEYGEN_VOICE_ID: ${{ secrets.HEYGEN_VOICE_ID }}
+          DARKLINE_V126_LIVE_ENABLED: 'true'
+          DARKLINE_HEYGEN_PAID_ENABLED: 'true'
+          DARKLINE_HEYGEN_PRICE_CHECKED_UTC: '2026-11-26'
+          DARKLINE_HEYGEN_RATE_CEILING: '15'
         run: |
           umask 077
-          python video/autonomous_daily_v124.py
+          export PYTHONPATH="$GITHUB_WORKSPACE/integration/video:$PWD/video"
+          python "$GITHUB_WORKSPACE/integration/video/marketing_daily_v1263.py" --execute
       - name: Encrypted review only
-        if: always() && steps.preflight.outputs.enabled == 'true'
+        if: always() && steps.preflight.outputs.execute == 'true' && steps.preflight.outputs.slot == '2'
         uses: actions/upload-artifact@v4
         with:
-          name: Darkline-V12.5-DAILY-ENCRYPTED-REVIEW
-          path: sealed-review-v124/*.dlenc
+          name: Darkline-V1264-DAILY-ENCRYPTED-REVIEW
+          path: approved-renderer/sealed-review-v124/*.dlenc
           if-no-files-found: ignore
           retention-days: 7
       - name: Clean private files
         if: always()
-        run: rm -rf private-preview-v124 sealed-review-v124 creative-preview-v10
+        run: rm -rf approved-renderer/private-preview-v124 approved-renderer/sealed-review-v124 approved-renderer/creative-preview-v10
