@@ -1,0 +1,163 @@
+name: Darkline V12.5.9 - ZONOS3-Mini raw reference and embedding audition
+on:
+  push:
+    branches: ['dev/v12.5.1-moss-private-review']
+    paths: ['.github/workflows/zonos3-v1259-review.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: darkline-zonos3-v1259-review
+  cancel-in-progress: false
+jobs:
+  voice-review:
+    if: github.ref == 'refs/heads/dev/v12.5.1-moss-private-review'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Check private reference availability without exposing it
+        env:
+          DARKLINE_MOSS_REFERENCE_B64: ${{ secrets.DARKLINE_MOSS_REFERENCE_B64 }}
+        run: |
+          python - <<'PY'
+          import os,base64
+          s=os.environ.get("DARKLINE_MOSS_REFERENCE_B64","")
+          if not s:raise SystemExit("MOSS_REFERENCE_MISSING: configure the existing prepared reference as an Actions secret; no synthesis attempted")
+          try:b=base64.b64decode(s,validate=True)
+          except Exception:raise SystemExit("MOSS_REFERENCE_INVALID")
+          if not 1000<=len(b)<=48000 or not b.startswith(b"OggS"):raise SystemExit("MOSS_REFERENCE_INVALID")
+          print("MOSS_REFERENCE_AVAILABLE")
+          PY
+      - name: Checkout exact approved renderer for existing encryption only
+        uses: actions/checkout@v4
+        with:
+          ref: 0578b45ee0c1a75265d53c43558583d6e55976e8
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify public model availability before installing or restoring private reference
+        run: |
+          set -euo pipefail
+          python -m pip install -q huggingface_hub
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from huggingface_hub import HfApi,snapshot_download
+          root=Path(os.environ["RUNNER_TEMP"])/"vox"
+          root.mkdir()
+          repo="Zyphra/ZONOS3-Mini"
+          info=HfApi().model_info(repo,token=False)
+          if getattr(info.card_data,"license",None)!="apache-2.0":raise RuntimeError("Model license needs review")
+          revision=info.sha
+          files=["gguf/backbone-ptq.gguf","gguf/zac-keep2.gguf","gguf/spk-encoder.gguf","gguf/zac-encoder.gguf","gguf/ssl-teacher.gguf"]
+          available={s.rfilename for s in info.siblings}
+          if not set(files)<=available:raise RuntimeError("Required published model files missing")
+          snapshot_download(repo_id=repo,revision=revision,local_dir=root/"model",allow_patterns=files,token=False)
+          (root/"revision.txt").write_text(revision)
+          snapshot_download(repo_id="Systran/faster-whisper-small",revision="536b0662742c02347bc0e980a01041f333bce120",local_dir=root/"asr",allow_patterns=["config.json","model.bin","tokenizer.json","vocabulary.*","preprocessor_config.json"],token=False)
+          print("V1259_MODEL_READY",revision,flush=True)
+          PY
+      - name: Compile pinned native CPU runtime
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg cmake build-essential pkg-config
+          cargo --version
+          git clone --no-checkout https://github.com/Zyphra/ZONOS3-Mini.git "$RUNNER_TEMP/vox/runtime"
+          git -C "$RUNNER_TEMP/vox/runtime" checkout --detach a50e14117d99181ba7f28047b451ba03ba1a09a9
+          git -C "$RUNNER_TEMP/vox/runtime" submodule update --init --recursive servers/ggml/ggml third_party/zyphra-textnorm
+          cmake -S "$RUNNER_TEMP/vox/runtime/servers/ggml" -B "$RUNNER_TEMP/vox/build" -DCMAKE_BUILD_TYPE=Release -DGGML_CUDA=OFF -DGGML_VULKAN=OFF
+          cmake --build "$RUNNER_TEMP/vox/build" --target zonos3-cli -j 4
+          python -m pip install -q 'numpy>=1.26,<3' cryptography 'faster-whisper==1.2.1'
+          test -x "$RUNNER_TEMP/vox/build/zonos3-cli"
+      - name: Restore reference into ephemeral private directory
+        env:
+          DARKLINE_MOSS_REFERENCE_B64: ${{ secrets.DARKLINE_MOSS_REFERENCE_B64 }}
+        run: |
+          umask 077
+          mkdir -p "$RUNNER_TEMP/darkline-private"
+          python - <<'PY'
+          import os,base64
+          from pathlib import Path
+          p=Path(os.environ["RUNNER_TEMP"])/"darkline-private"/"reference.ogg"
+          p.write_bytes(base64.b64decode(os.environ["DARKLINE_MOSS_REFERENCE_B64"],validate=True))
+          PY
+          ffmpeg -nostdin -v error -i "$RUNNER_TEMP/darkline-private/reference.ogg" -ac 1 -ar 48000 "$RUNNER_TEMP/darkline-private/reference.wav"
+          rm "$RUNNER_TEMP/darkline-private/reference.ogg"
+      - name: Compare embedding and raw reference Hungarian voice
+        env:
+          HF_HUB_OFFLINE: '1'
+          TRANSFORMERS_OFFLINE: '1'
+          OMP_NUM_THREADS: '4'
+          MKL_NUM_THREADS: '4'
+        run: |
+          set -euo pipefail
+          umask 077
+          python - <<'PY'
+          import os,sys,json,io,zipfile,subprocess,re,unicodedata,time,random
+          from pathlib import Path
+          import numpy as np
+          import wave
+          from faster_whisper import WhisperModel
+          from cryptography.hazmat.primitives import serialization
+          sys.path.insert(0,str(Path.cwd()/"video"))
+          import private_review_v111 as seal
+          public="-----BEGIN PUBLIC KEY-----\nMIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEApp/0kvJL+cWi3tAxxwz0\nQgOqMjwCofTXHePX84IRVpQqlPCu67nwUD5Wec5Xa74S7Mw2mrq6AaVjUTgR9Z8O\nQPoykgacXI0mhODYA+9U1CTDf1Bib3xi6O2aQnq3iDTbLNzuF964HY5y/UEa+8H4\nVByAhKNW52Uxa62N8nZOdQGq4rDT8MMUQ3dzkjyq9XIya9Sf8etq6V09co/fmT57\n4+bMv94AkqqD/lqRHWXSmHNUp+0DykokI4NBJ5ZI8dKOI+G9qJCP+bPQKK5Kt+zH\nmOY/eD29UHYDbwhY5fv982MrWTrXZVtm2zW94VeIw5iUl8Wvu1oVK6q2oAR1mWny\nCWpgEt9mZab6sAoKBRdFn0n+EltD+W7TqMRlSsH3IYCwP/BP6X5DGmU2emNFinav\norF72xOYYgkv4BRy7HpebmRqQSZkM0vQdD+QMGotXsrzqi3nbnjPwRkLKTr+v20b\nqx6aCWOdhM8J9owChiOL2mwY5HU2lXdbGGxm7YCVxOz1AgMBAAE=\n-----END PUBLIC KEY-----\n".encode("ascii")
+          d=Path(os.environ["RUNNER_TEMP"])/"darkline-private"
+          root=Path(os.environ["RUNNER_TEMP"])/"vox"
+          out=Path(os.environ["RUNNER_TEMP"])/"darkline-sealed";out.mkdir()
+          cli=root/"build"/"zonos3-cli"
+          gg=root/"model"/"gguf"
+          asr=WhisperModel(str(root/"asr"),device="cpu",compute_type="int8",cpu_threads=2,local_files_only=True)
+          text="Van egy ötleted, de nem tudod, hogyan indulj el? A Darkline Studio segít megtalálni a neked való megoldást."
+          def words(s):return re.findall(r"[^\W_]+",unicodedata.normalize("NFC",s).casefold())
+          def edit(a,b):
+              row=list(range(len(b)+1))
+              for i,x in enumerate(a,1):
+                  nxt=[i]
+                  for j,y in enumerate(b,1):nxt.append(min(nxt[-1]+1,row[j]+1,row[j-1]+(x!=y)))
+                  row=nxt
+              return row[-1]
+          profiles={"A_zonos3_embedding":"embedding","B_zonos3_reference":"reference"}
+          report={"engine":"ZONOS3-Mini","model_revision":(root/"revision.txt").read_text(),"runtime":"a50e14117d99181ba7f28047b451ba03ba1a09a9","publication":False,"paid_api":False,"owner_approved":False,"text":text,"profiles":{},"human_review_required":True}
+          buf=io.BytesIO()
+          with zipfile.ZipFile(buf,"w",zipfile.ZIP_DEFLATED) as b:
+              for name,mode in profiles.items():
+                  try:
+                      start=time.monotonic()
+                      path=d/(name+".wav")
+                      cmd=[str(cli),str(gg/"backbone-ptq.gguf"),"--cpu","--tts",text,str(path),"--clone",str(d/"reference.wav"),"--speaker-mode",mode,"--seed","125901","--max","600"]
+                      r=subprocess.run(cmd,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,timeout=420)
+                      if r.returncode:raise RuntimeError("native synthesis failed: "+str(r.returncode))
+                      matches=re.findall(r"tts:\s*(\d+) frames, eos_frame=(-?\d+)",r.stdout)
+                      if not matches:raise RuntimeError("EOS missing")
+                      frames,eos=map(int,matches[-1])
+                      if not 0<=eos<frames<600:raise RuntimeError("incomplete generation")
+                      with wave.open(str(path),"rb") as w:dur=w.getnframes()/w.getframerate()
+                      a=np.frombuffer(subprocess.check_output(["ffmpeg","-v","error","-i",str(path),"-ac","1","-ar","44100","-f","f32le","-"]),dtype="<f4")
+                      if not 2<=dur<=25 or not np.isfinite(a).all() or not .005<float(np.max(np.abs(a)))<1.01:raise RuntimeError("invalid output")
+                      pcm=np.frombuffer(subprocess.check_output(["ffmpeg","-v","error","-i",str(path),"-ac","1","-ar","16000","-f","f32le","-"]),dtype="<f4").copy()
+                      seg,_=asr.transcribe(pcm,language="hu",beam_size=5,temperature=0,condition_on_previous_text=False)
+                      heard=" ".join(s.text.strip() for s in seg)
+                      report["profiles"][name]={"speaker_mode":mode,"frames":frames,"eos_frame":eos,"duration":dur,"transcript":heard,"wer":edit(words(text),words(heard))/len(words(text)),"elapsed":round(time.monotonic()-start,2),"technical_gate":"PASS"}
+                      b.write(path,name+".wav")
+                      print("V1259_SAMPLE",name,json.dumps(report["profiles"][name],ensure_ascii=False),flush=True)
+                  except Exception as e:
+                      report["profiles"][name]={"technical_gate":"REJECT","error":type(e).__name__}
+                      print("V1259_SAMPLE_REJECT",name,type(e).__name__,flush=True)
+              b.writestr("quality.json",json.dumps(report,ensure_ascii=False,indent=2))
+          (out/"Darkline_V1259_zonos3.dlenc").write_bytes(seal.seal(buf.getvalue(),serialization.load_pem_public_key(public)))
+          if not any(x["technical_gate"]=="PASS" for x in report["profiles"].values()):raise RuntimeError("No valid audition")
+          PY
+      - name: Upload encrypted audition only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Darkline-V1259-ENCRYPTED-ZONOS3
+          path: ${{ runner.temp }}/darkline-sealed/*.dlenc
+          if-no-files-found: warn
+          retention-days: 3
+      - name: Remove temporary private media
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/darkline-private" "$RUNNER_TEMP/darkline-sealed" "$RUNNER_TEMP/vox"
