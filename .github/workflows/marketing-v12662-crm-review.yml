@@ -1,0 +1,97 @@
+name: Darkline V12.6.6.2 - CRM native board review
+on:
+  push:
+    branches: ['dev/v12.5.1-moss-private-review']
+    paths: ['.github/workflows/marketing-v12662-crm-review.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  policy:
+    if: github.ref == 'refs/heads/dev/v12.5.1-moss-private-review'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 0578b45ee0c1a75265d53c43558583d6e55976e8
+          path: approved-renderer
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Catalogue, history selection, budget, styles and original fallback gates
+        run: |
+          python -m pip install -q 'numpy>=1.26,<3' 'Pillow>=11,<13' playwright cryptography
+          export PYTHONPATH="$PWD/video:$PWD/approved-renderer/video"
+          python video/heygen_budget_v126.py
+          python video/heygen_budget_adapter_v126.py
+          python video/marketing_daily_v1265.py --selftest
+          python video/demo_topics_v1266.py
+          python video/selection_v1266.py
+          python video/demo_renderer_v1266.py
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from demo_topics_v1266 import manifest
+          assert manifest()==json.loads(Path("video/demo_topics_v1266_captions.json").read_text())
+          print("V1266_MANIFEST_PASS exact Worker and renderer captions")
+          PY
+          node --check video/worker_v1266_catalogue.mjs
+          node video/worker_v1265_fallback.test.mjs
+          node approved-renderer/video/video_publish_gate_v12.test.mjs
+  demo-capture:
+    needs: policy
+    strategy:
+      fail-fast: false
+      matrix:
+        family: [crm]
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 0578b45ee0c1a75265d53c43558583d6e55976e8
+          path: approved-renderer
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install public capture dependencies
+        run: |
+          python -m pip install -q 'numpy>=1.26,<3' 'Pillow>=11,<13' playwright cryptography
+          python -m playwright install --with-deps chromium
+      - name: Capture actual demo and public scenes, no voice, no save, no post
+        env:
+          FAMILY: ${{ matrix.family }}
+        run: |
+          export PYTHONPATH="$PWD/video:$PWD/approved-renderer/video"
+          python - <<'PY'
+          import os,tempfile
+          from pathlib import Path
+          import demo_topics_v1266 as cat
+          import demo_renderer_v1266 as render
+          group=[t for t in cat.NEW if cat.META[t.key]["family"]==os.environ["FAMILY"]]
+          assert len(group)==7
+          failed=[]
+          for topic in group:
+              try:
+                  with tempfile.TemporaryDirectory() as d:
+                      shots,audit=render.capture(topic,Path(d))
+                      assert len(shots)==len(audit)==10
+                      assert min(x["minimum_projected_px"] for x in audit)>=32
+                      assert sum(x["sample_demo"] for x in audit)>=3
+                      print("V1266_TOPIC_CAPTURE_PASS",topic.key,len(audit),min(x["minimum_projected_px"] for x in audit),flush=True)
+              except Exception as e:
+                  failed.append(topic.key)
+                  print("V1266_TOPIC_CAPTURE_FAIL",topic.key,str(e)[:800],flush=True)
+                  # Stop this family on first failing capture; preserve original gate.
+                  break
+          assert not failed,failed
+          PY
