@@ -1,0 +1,60 @@
+name: Darkline V12.5 private own-voice CPU test
+on:
+  push:
+    branches: [dev/video-dedup-v1]
+    paths: ['.github/workflows/own-voice-v125.yml']
+permissions:
+  contents: read
+jobs:
+  voice-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check reference configured without revealing it
+        id: ref
+        env:
+          DARKLINE_MOSS_REFERENCE_B64: ${{ secrets.DARKLINE_MOSS_REFERENCE_B64 }}
+        run: |
+          if [ -z "$DARKLINE_MOSS_REFERENCE_B64" ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "V125_REFERENCE_SECRET_MISSING"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-python@v5
+        if: steps.ref.outputs.ready == 'true'
+        with:
+          python-version: '3.12'
+      - name: Install pinned official CPU engine before loading private reference
+        if: steps.ref.outputs.ready == 'true'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg libsndfile1
+          git init "$RUNNER_TEMP/moss"
+          git -C "$RUNNER_TEMP/moss" remote add origin https://github.com/OpenMOSS/MOSS-TTS-Nano.git
+          git -C "$RUNNER_TEMP/moss" fetch --depth 1 origin 8b7bcc9341b3b4ef3a3a58ba1338a7d85ff133eb
+          git -C "$RUNNER_TEMP/moss" checkout --detach FETCH_HEAD
+          python -m pip install -q torch==2.7.0 torchaudio==2.7.0 --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -q -r "$RUNNER_TEMP/moss/requirements.txt" cryptography
+          python -m pip install -q -e "$RUNNER_TEMP/moss"
+      - name: Private clone audition on CPU only
+        if: steps.ref.outputs.ready == 'true'
+        env:
+          MOSS_DIR: ${{ runner.temp }}/moss
+          DARKLINE_MOSS_REFERENCE_B64: ${{ secrets.DARKLINE_MOSS_REFERENCE_B64 }}
+        run: |
+          umask 077
+          python video/own_voice_moss_v125.py
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.ref.outputs.ready == 'true'
+        with:
+          name: Darkline-V12.5-ENCRYPTED-OWN-VOICE-REVIEW
+          path: sealed-voice-v125/*.dlenc
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Clean private outputs
+        if: always()
+        run: rm -rf sealed-voice-v125
