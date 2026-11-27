@@ -1,0 +1,27 @@
+name: Darkline V12.8.5 unified offline review regression
+on:
+  push:
+    branches: ['dev/v12.8.1-private-integration']
+    paths: ['video/review_v1285.py','video/test_review_v1285.py','.github/workflows/v1285-unified-regression.yml']
+permissions:
+  contents: read
+jobs:
+  checks:
+    if: github.ref == 'refs/heads/dev/v12.8.1-private-integration'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fonts-dejavu-core ffmpeg libegl1 libgl1
+          python -m pip install -q Pillow numpy playwright cryptography opencv-python-headless vtk
+      - run: |
+          python video/test_review_v1285.py
+          python video/heygen_budget_v126.py
+          python video/selection_v1266.py
