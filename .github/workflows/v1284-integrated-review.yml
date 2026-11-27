@@ -1,0 +1,65 @@
+name: Darkline V12.8.4 integrated scene review
+on:
+  push:
+    branches: ['dev/v12.8.1-private-integration']
+    paths: ['video/integration_v1284.py', '.github/workflows/v1284-integrated-review.yml']
+permissions:
+  contents: read
+jobs:
+  visual:
+    if: github.ref == 'refs/heads/dev/v12.8.1-private-integration'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        include:
+          - batch: '01'
+            scenes: '0,1'
+            counts: '126,110'
+          - batch: '02'
+            scenes: '2,3'
+            counts: '103,110'
+          - batch: '03'
+            scenes: '4,5'
+            counts: '113,100'
+          - batch: '04'
+            scenes: '6,7'
+            counts: '113,91'
+          - batch: '05'
+            scenes: '8,9'
+            counts: '103,149'
+    env:
+      OMP_NUM_THREADS: '2'
+      LP_NUM_THREADS: '2'
+      OPENBLAS_NUM_THREADS: '2'
+      VTK_DEFAULT_OPENGL_WINDOW: vtkEGLRenderWindow
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install standard browser and renderer dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-dejavu-core libegl1 libgl1
+          python -m pip install -q Pillow numpy playwright cryptography opencv-python-headless vtk
+          python -m playwright install --with-deps chromium
+      - name: Validate approved models and shared catalogue policy
+        run: |
+          test "$(git hash-object video/cinematic_devices_v1271.py)" = "e51fe9fdf80e69adade4c165c9065cc283271d2b"
+          test "$(git hash-object video/laptop_v1273.py)" = "6c2a19f3a3b441654eab85dfd2ac6fc2b87146d5"
+          python video/integration_v1284.py --selftest
+          python video/heygen_budget_v126.py
+      - name: Record and render native scenes (no private voice)
+        run: python video/integration_v1284.py --topic web_services --scenes '${{ matrix.scenes }}' --counts '${{ matrix.counts }}' --out review
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: V1284-scenes-${{ matrix.batch }}
+          path: review/
+          retention-days: 2
+          if-no-files-found: warn
