@@ -1,0 +1,52 @@
+name: Darkline V12.8.3 adaptive private review
+on:
+  push:
+    branches: ['dev/v12.8.1-private-integration']
+    paths: ['video/adaptive_context_v1283.py','video/integration_v1283.py','video/action_device_v1283.py','video/action_review_v1283_desktop.py','.github/workflows/v1283-adaptive-review.yml']
+permissions:
+  contents: read
+jobs:
+  visual:
+    if: github.ref == 'refs/heads/dev/v12.8.1-private-integration'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        family: [auto, menu, salon, crm, web]
+    env:
+      OMP_NUM_THREADS: '2'
+      LP_NUM_THREADS: '2'
+      OPENBLAS_NUM_THREADS: '2'
+      VTK_DEFAULT_OPENGL_WINDOW: vtkEGLRenderWindow
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install standard browser and renderer dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-dejavu-core libegl1 libgl1
+          python -m pip install -q Pillow numpy playwright cryptography opencv-python-headless vtk
+          python -m playwright install --with-deps chromium
+      - name: Check approved source and 510 adaptive context layers
+        run: |
+          test "$(git hash-object video/cinematic_devices_v1271.py)" = "e51fe9fdf80e69adade4c165c9065cc283271d2b"
+          test "$(git hash-object video/cinematic_render_v1271.py)" = "6436b7d77ac515e7d3ee9a41019cb670bf115d0c"
+          test "$(git hash-object video/laptop_v1273.py)" = "6c2a19f3a3b441654eab85dfd2ac6fc2b87146d5"
+          python video/adaptive_context_v1283.py
+          python video/heygen_budget_v126.py
+          python video/selection_v1266.py
+      - name: Capture actual demonstration and render selected device
+        run: python video/action_device_v1283.py ${{ matrix.family }} --out review
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: V1283-demo-${{ matrix.family }}
+          path: review/
+          retention-days: 3
+          if-no-files-found: error
