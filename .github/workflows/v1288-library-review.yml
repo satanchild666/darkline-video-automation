@@ -1,0 +1,51 @@
+name: Darkline V12.8.8 voice library and diverse scene review
+on:
+  push:
+    branches: ['dev/v12.8.1-private-integration']
+    paths: ['video/narration_library_v1288.py','video/legacy_review_v1288.py','.github/workflows/v1288-library-review.yml']
+permissions:
+  contents: read
+jobs:
+  visual:
+    if: github.ref == 'refs/heads/dev/v12.8.1-private-integration'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - family: auto
+            scenes: '0,8'
+          - family: menu
+            scenes: '0,8'
+    env:
+      OMP_NUM_THREADS: '2'
+      LP_NUM_THREADS: '2'
+      OPENBLAS_NUM_THREADS: '2'
+      VTK_DEFAULT_OPENGL_WINDOW: vtkEGLRenderWindow
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-dejavu-core libegl1 libgl1
+          python -m pip install -q Pillow numpy playwright cryptography opencv-python-headless vtk
+          python -m playwright install --with-deps chromium
+      - name: Verify unchanged catalogue and library guards
+        run: |
+          python video/test_voice_library_v1288.py
+          python video/heygen_budget_v126.py
+          python video/transitions_v1286.py --selftest
+      - name: Capture distinct native views without voice
+        run: python video/legacy_review_v1288.py '${{ matrix.family }}' --scenes '${{ matrix.scenes }}' --out review
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: V1288-${{ matrix.family }}
+          path: review/
+          retention-days: 2
+          if-no-files-found: warn
