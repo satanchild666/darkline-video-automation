@@ -1,0 +1,35 @@
+name: Darkline V12.8.2 offline regression
+on:
+  push:
+    branches: ['dev/v12.8.1-private-integration']
+    paths: ['video/readability_v1282.py', 'video/test_readability_v1282.py', '.github/workflows/v1282-offline-review.yml']
+permissions:
+  contents: read
+jobs:
+  checks:
+    if: github.ref == 'refs/heads/dev/v12.8.1-private-integration'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install offline review dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fonts-dejavu-core
+          python -m pip install -q numpy Pillow opencv-python-headless
+      - name: Exact approved code
+        run: |
+          test "$(git hash-object video/cinematic_devices_v1271.py)" = "e51fe9fdf80e69adade4c165c9065cc283271d2b"
+          test "$(git hash-object video/cinematic_render_v1271.py)" = "6436b7d77ac515e7d3ee9a41019cb670bf115d0c"
+          test "$(git hash-object video/laptop_v1273.py)" = "6c2a19f3a3b441654eab85dfd2ac6fc2b87146d5"
+          test "$(git hash-object video/readability_v1282.py)" = "91dde3bbc252000a4cede4fc1da2d53b646ba665"
+      - name: Check ten overlays and existing cost and topic gates
+        run: |
+          python video/test_readability_v1282.py
+          python video/heygen_budget_v126.py
+          python video/selection_v1266.py
