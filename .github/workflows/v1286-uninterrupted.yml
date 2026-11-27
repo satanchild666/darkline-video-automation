@@ -1,0 +1,46 @@
+name: Darkline V12.8.6 uninterrupted private review
+on:
+  push:
+    branches: ['dev/v12.8.1-private-integration']
+    paths: ['video/daily_review_v1286.py','video/transitions_v1286.py','.github/workflows/v1286-uninterrupted.yml']
+permissions:
+  contents: read
+jobs:
+  review:
+    if: github.ref == 'refs/heads/dev/v12.8.1-private-integration'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      OMP_NUM_THREADS: '2'
+      LP_NUM_THREADS: '2'
+      OPENBLAS_NUM_THREADS: '2'
+      VTK_DEFAULT_OPENGL_WINDOW: vtkEGLRenderWindow
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fonts-dejavu-core ffmpeg libegl1 libgl1
+          python -m pip install -q Pillow numpy playwright cryptography opencv-python-headless vtk
+          python -m playwright install --with-deps chromium
+      - name: Check approved models, daily decisions and transitions
+        run: |
+          test "$(git hash-object video/cinematic_devices_v1271.py)" = "e51fe9fdf80e69adade4c165c9065cc283271d2b"
+          test "$(git hash-object video/laptop_v1273.py)" = "6c2a19f3a3b441654eab85dfd2ac6fc2b87146d5"
+          python video/test_review_v1285.py
+          python video/transitions_v1286.py --selftest
+          python video/daily_review_v1286.py --selftest
+          python video/heygen_budget_v126.py
+          python video/selection_v1266.py
+      - name: Uninterrupted capture, assembly and transition proof
+        run: python video/daily_review_v1286.py --topic web_services --folder scenes --out review/web_services.mp4
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: V1286-uninterrupted-web
+          path: review/
+          retention-days: 2
