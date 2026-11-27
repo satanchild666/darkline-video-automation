@@ -18,11 +18,16 @@ def private_runtime(env=None):
     env=os.environ if env is None else env
     if env.get('GITHUB_ACTIONS')=='true':
         require(env.get('DARKLINE_PRIVATE_REVIEW')=='true','private CI not explicitly authorized')
-        require(env.get('GITHUB_EVENT_NAME') in ('workflow_dispatch','schedule'),'untrusted CI event')
+        event_name=env.get('GITHUB_EVENT_NAME')
+        require(event_name in ('workflow_dispatch','schedule','push'),'untrusted CI event')
         try: event=json.loads(Path(env['GITHUB_EVENT_PATH']).read_text())
         except (OSError,ValueError,KeyError):raise ValueError('CI privacy not verified') from None
         repo=event.get('repository',{})
         require(repo.get('private') is True and repo.get('full_name')==env.get('GITHUB_REPOSITORY'),'public or unverified CI forbidden')
+        if event_name=='push':
+            require(str(repo.get('id'))=='1459846231' and str(repo.get('owner',{}).get('id'))=='328877800','unapproved runner repository')
+            require(env.get('GITHUB_REF')=='refs/heads/dev/v12.9.0-private-runner' and event.get('ref')==env.get('GITHUB_REF'),'unapproved runner branch')
+            require(env.get('GITHUB_WORKFLOW_REF')=='satanchild666/Darkline-Studio-AI-marketing-automation/.github/workflows/v1290-private-review.yml@refs/heads/dev/v12.9.0-private-runner','unapproved runner workflow')
     return True
 
 def expected_members():

@@ -1,0 +1,29 @@
+name: Darkline V12.9.0 daily private runner regression
+on:
+  push:
+    branches: ['dev/v12.8.1-private-integration']
+    paths: ['video/daily_run_v1290.py','video/test_daily_run_v1290.py','.github/workflows/v1290-regression.yml']
+permissions:
+  contents: read
+jobs:
+  checks:
+    if: github.ref == 'refs/heads/dev/v12.8.1-private-integration'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.11'
+      - run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fonts-dejavu-core ffmpeg libegl1 libgl1
+          python -m pip install -q Pillow numpy playwright cryptography opencv-python-headless vtk
+      - run: |
+          python video/test_private_storage_v1289.py
+          python video/test_daily_run_v1290.py
+          python video/heygen_budget_v126.py
+          python video/selection_v1266.py
+          python video/marketing_daily_v1265.py --selftest
