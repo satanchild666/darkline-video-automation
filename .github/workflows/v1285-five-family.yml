@@ -1,0 +1,98 @@
+name: Darkline V12.8.5 five-family full scene reviews
+on:
+  push:
+    branches: ['dev/v12.8.1-private-integration']
+    paths: ['video/integration_v1285.py','.github/workflows/v1285-five-family.yml','video/assemble_silent_v1285.py']
+permissions:
+  contents: read
+jobs:
+  visual:
+    if: github.ref == 'refs/heads/dev/v12.8.1-private-integration'
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    strategy:
+      fail-fast: false
+      max-parallel: 10
+      matrix:
+        topic: [auto_booking, menu_categories, salon_services, crm_board, web_services]
+        half: [first, second]
+    env:
+      OMP_NUM_THREADS: '2'
+      LP_NUM_THREADS: '2'
+      OPENBLAS_NUM_THREADS: '2'
+      VTK_DEFAULT_OPENGL_WINDOW: vtkEGLRenderWindow
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install standard browser and renderer
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-dejavu-core libegl1 libgl1
+          python -m pip install -q Pillow numpy playwright cryptography opencv-python-headless vtk
+          python -m playwright install --with-deps chromium
+      - name: Verify approved source and 51-topic capture policy
+        run: |
+          test "$(git hash-object video/cinematic_devices_v1271.py)" = "e51fe9fdf80e69adade4c165c9065cc283271d2b"
+          test "$(git hash-object video/laptop_v1273.py)" = "6c2a19f3a3b441654eab85dfd2ac6fc2b87146d5"
+          python video/integration_v1285.py --selftest
+          python video/heygen_budget_v126.py
+      - name: Capture and render five scenes
+        env:
+          TOPIC: ${{ matrix.topic }}
+          HALF: ${{ matrix.half }}
+        run: |
+          if [ "$HALF" = first ]; then scenes=0,1,2,3,4; else scenes=5,6,7,8,9; fi
+          counts=105,105,105,105,105
+          if [ "$TOPIC" = web_services ]; then
+            if [ "$HALF" = first ]; then counts=126,110,103,110,113; else counts=100,113,91,103,149; fi
+          fi
+          python video/integration_v1285.py --topic "$TOPIC" --scenes "$scenes" --counts "$counts" --out review
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: V1285-${{ matrix.topic }}-${{ matrix.half }}
+          path: review/
+          retention-days: 2
+          if-no-files-found: warn
+  full:
+    if: github.ref == 'refs/heads/dev/v12.8.1-private-integration' && !cancelled()
+    needs: visual
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        topic: [auto_booking, menu_categories, salon_services, crm_board, web_services]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: V1285-${{ matrix.topic }}-*
+          path: scenes
+          merge-multiple: true
+      - name: Install assembly dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-dejavu-core libegl1 libgl1
+          python -m pip install -q Pillow numpy playwright cryptography opencv-python-headless vtk
+      - name: Assemble full silent review from verified receipts
+        env:
+          TOPIC: ${{ matrix.topic }}
+        run: |
+          mkdir -p review
+          python video/assemble_silent_v1285.py "$TOPIC" scenes "review/$TOPIC.mp4"
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: V1285-full-${{ matrix.topic }}
+          path: review/
+          retention-days: 2
