@@ -1,0 +1,53 @@
+name: Darkline V12.8.7 archived-script scene proofs
+on:
+  push:
+    branches: ['dev/v12.8.1-private-integration']
+    paths: ['video/legacy_review_v1287.py','.github/workflows/v1287-legacy-review.yml']
+permissions:
+  contents: read
+jobs:
+  visual:
+    if: github.ref == 'refs/heads/dev/v12.8.1-private-integration'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        include:
+          - family: auto
+            batch: 'a'
+            scenes: '3,4,6'
+          - family: menu
+            batch: 'a'
+            scenes: '2,4,7'
+    env:
+      OMP_NUM_THREADS: '2'
+      LP_NUM_THREADS: '2'
+      OPENBLAS_NUM_THREADS: '2'
+      VTK_DEFAULT_OPENGL_WINDOW: vtkEGLRenderWindow
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-dejavu-core libegl1 libgl1
+          python -m pip install -q Pillow numpy playwright cryptography opencv-python-headless vtk
+          python -m playwright install --with-deps chromium
+      - name: Validate existing catalogue and voice budget
+        run: |
+          python video/integration_v12852.py --selftest
+          python video/heygen_budget_v126.py
+      - name: Record actual public demo actions for archived script
+        run: python video/legacy_review_v1287.py '${{ matrix.family }}' --scenes '${{ matrix.scenes }}' --out review
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: V1287-legacy-${{ matrix.family }}-${{ matrix.batch }}
+          path: review/
+          retention-days: 2
+          if-no-files-found: warn
