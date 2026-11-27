@@ -92,7 +92,7 @@ def keyboard_texture():
         for i in range(7):
             for j in range(34):
                 x0=xx+i*6;y0=32+j*7;d.ellipse((x0,y0,x0+2,y0+2),fill=(44,47,54))
-    labels=[['esc','F1','F2','F3','F4','F5','F6','F7','F8','F9','F10','F11','F12','⏻'],list('1234567890')+['−','+','⌫'],['tab']+list('QWERTYUIOP')+['[',']'],['caps']+list('ASDFGHJKL')+[';',"'","enter"],['shift']+list('ZXCVBNM')+[',','.','/','shift'],['fn','ctrl','alt','cmd','space','cmd','alt','←','↑','→']]
+    labels=[['esc','F1','F2','F3','F4','F5','F6','F7','F8','F9','F10','F11','F12','⏻'],list('1234567890')+['−','+','⌫'],['tab']+list('QWERTYUIOP')+['[',']'],['caps']+list('ASDFGHJKL')+[';',"'",'enter'],['shift']+list('ZXCVBNM')+[',','.','/','shift'],['fn','ctrl','alt','cmd','space','cmd','alt','←','↑','→']]
     f=ImageFont.truetype(FONT,17);fsmall=ImageFont.truetype(FONT,13)
     for i,row in enumerate(labels):
         yy=32+i*43;kh=35;weights=[4.5 if k=='space' else 1.65 if k in ('shift','enter','caps','tab') else 1 for k in row];total=sum(weights);xx=86
