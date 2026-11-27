@@ -22,6 +22,7 @@ jobs:
           sudo apt-get install -y -qq fonts-dejavu-core ffmpeg libegl1 libgl1
           python -m pip install -q Pillow numpy playwright cryptography opencv-python-headless vtk
       - run: |
+          test "$(git hash-object video/private_storage_v1289.py)" = "8903edafeb7098cecbec0c873645d625803ee11f"
           python video/test_private_storage_v1289.py
           python video/test_daily_run_v1290.py
           python video/heygen_budget_v126.py

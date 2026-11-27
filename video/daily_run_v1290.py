@@ -45,8 +45,8 @@ def execute(request,bundle,folder,out,decide,assemble,capture=True):
         claim.write_text(json.dumps({'status':'FAILED_NO_RETRY','mode':request['mode'],'publication':False,'voice_calls':0}));raise
 
 def main():
-    import private_storage_v1289 as storage
-    import cloud_review_v1289 as cloud
+    import private_storage_v1290 as storage
+    import cloud_review_v1290 as cloud
     a=argparse.ArgumentParser();a.add_argument('request',type=Path);a.add_argument('folder',type=Path);a.add_argument('out',type=Path);a.add_argument('--drive-file-id',required=True);x=a.parse_args()
     storage.private_runtime();request=validate(json.loads(x.request.read_text()))
     with tempfile.TemporaryDirectory(prefix='darkline-daily-') as tmp:
