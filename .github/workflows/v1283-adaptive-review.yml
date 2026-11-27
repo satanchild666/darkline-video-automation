@@ -1,4 +1,4 @@
-name: Darkline V12.8.3 adaptive private review
+name: Darkline V12.8.3.1 adaptive native viewport repair
 on:
   push:
     branches: ['dev/v12.8.1-private-integration']
@@ -14,7 +14,7 @@ jobs:
       fail-fast: false
       max-parallel: 5
       matrix:
-        family: [auto, menu, salon, crm, web]
+        family: [crm, web]
     env:
       OMP_NUM_THREADS: '2'
       LP_NUM_THREADS: '2'
@@ -46,7 +46,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: success()
         with:
-          name: V1283-demo-${{ matrix.family }}
+          name: V12831-demo-${{ matrix.family }}
           path: review/
           retention-days: 3
           if-no-files-found: error

@@ -80,11 +80,11 @@ def locate_action(frames,before,after):
     delta=float(np.abs(arr[i]-arr[j]).mean())
     if delta<.5:raise RuntimeError("Actual recording shows no meaningful change")
     return frames[i:j+1],{"before_match_error":round(float(d1[i]),3),"after_match_error":round(float(d2[j]),3),"recorded_pixel_delta":round(delta,3)}
-def capture_case(browser,case):
+def capture_case(browser,case,viewport=(1024,640)):
     family,key,selector,index,proof,result,title,after=case
     # Native responsive layout: keep every pixel. CRM gets a narrower browser,
     # not a digital crop or CSS zoom. Use the same dimensions for every phase.
-    width,height=(1024,640) if family in ("crm","web") else (480,800)
+    width,height=viewport
     tmp=tempfile.TemporaryDirectory()
     ctx=browser.new_context(viewport={"width":width,"height":height},device_scale_factor=2,service_workers="block",
                             record_video_dir=tmp.name,record_video_size={"width":width,"height":height})

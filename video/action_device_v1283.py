@@ -14,24 +14,26 @@ import action_review_v1269 as standard
 from action_review_v1267 import CASES
 from action_device_v1281 import TOPICS,fit_viewport
 
-def action_scene(family,phase):
+def action_scene(family,phase,selected=None):
     case=next(c for c in CASES if c[0]==family)
     p=engine.plan(TOPICS[family])
     matches=[s for s in p['scenes'] if s['selector']==case[5]]
     if not matches:raise ValueError('no catalogue match for '+family)
-    s=dict(matches[0])
+    s=dict(next((m for m in matches if m['key']=='demo_menu_filter'),matches[0]))
+    if selected is not None:s.update(device=selected['device'],device_reason=selected['reason'])
     # Original scene's context is retained; the header describes the actual action.
     s['heading']=case[7] if phase=='after' else case[6]
     return s
-def render(family,assets,out):
+def render(family,assets,out,selected):
     before,actual,after,audit=assets
-    s=action_scene(family,'before');device=s['device'];desktop=device=='desktop'
+    s=action_scene(family,'before',selected);device=s['device'];desktop=device=='desktop'
     assert audit['state_changed'] and not audit['crop'] and audit['viewport_coverage']==1
-    assert (tuple(audit['before']['viewport_css'])==(1024,640))==desktop
+    assert tuple(audit['before']['viewport_css'])==tuple(selected['viewport'])
+    if desktop:assert selected['viewport'][0]/selected['viewport'][1]==1.6
     bg=engine.prior.bg()
     bases={}
     for phase in ('before','action','after'):
-        st=action_scene(family,phase);base=engine.header(bg,st)
+        st=action_scene(family,phase,selected);base=engine.header(bg,st)
         im=Image.fromarray(cv2.cvtColor(base,cv2.COLOR_BGR2RGB));d=ImageDraw.Draw(im)
         labels={'before':'1 / 3  •  Kiinduló állapot','action':'2 / 3  •  Valódi művelet','after':'3 / 3  •  Látható eredmény'}
         d.text((540,1515),labels[phase],font=engine.prior.font(40),anchor='mm',fill='#eee8ff')
@@ -60,17 +62,33 @@ def render(family,assets,out):
     finally:
         if proc.poll() is None:proc.kill();proc.wait()
         if tmp.exists():tmp.unlink()
-    audit.update(topic=TOPICS[family],fresh_browser=True,device=device,device_reason=s['device_reason'],frames=count,duration_seconds=8,minimum_final_css_scale=min_scale,minimum_screen_width=min_width,voice_calls=0,publication=False,production_ready=False)
+    audit.update(topic=TOPICS[family],fresh_browser=True,device=device,device_reason=s['device_reason'],frames=count,duration_seconds=8,minimum_final_css_scale=min_scale,minimum_screen_width=min_width,voice_calls=0,publication=False,production_ready=False,selection_attempts=selected['attempts'],preferred_device=selected['preferred'])
     (out/(family+'.json')).write_text(json.dumps(audit,ensure_ascii=False,indent=2));print('V1283_ACTION_PASS',family,device,flush=True)
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('family',choices=TOPICS);parser.add_argument('--out',type=Path,required=True);a=parser.parse_args()
     a.out.mkdir(parents=True,exist_ok=False);case=next(c for c in CASES if c[0]==a.family)
     scene=action_scene(a.family,'before')
+    attempts=[];assets=None;preferred=scene['device']
     with sync_playwright() as pw:
         browser=pw.chromium.launch(headless=True,args=['--no-sandbox'])
         try:
-            cap=desktop_capture if scene['device']=='desktop' else repaired if a.family in ('auto','salon') else standard
-            assets=cap.capture_case(browser,case)
+            if preferred=='desktop':
+                # Native responsive layout, not CSS zoom or crop. Keep the 16:10 display.
+                for size in ((1024,640),(720,450),(640,400)):
+                    try:
+                        assets=desktop_capture.capture_case(browser,case,viewport=size)
+                        attempts.append(dict(device='desktop',viewport=list(size),pass_gate=True));selected=dict(device='desktop',viewport=list(size),reason='management workspace; readable native viewport');break
+                    except RuntimeError as err:
+                        # Only known visual gate failures permit a new isolated viewport.
+                        if not any(x in str(err) for x in ('Insufficient surrounding UI context','Actual result is outside visible viewport','Browser recording does not match full viewport screenshots')):raise
+                        attempts.append(dict(device='desktop',viewport=list(size),pass_gate=False,reason=str(err)[:320]))
+            if assets is None:
+                cap=repaired if a.family in ('auto','salon') else standard
+                assets=cap.capture_case(browser,case)
+                size=assets[3]['before']['viewport_css']
+                attempts.append(dict(device='mobile',viewport=size,pass_gate=True))
+                selected=dict(device='mobile',viewport=size,reason='native visitor view' if preferred=='mobile' else 'desktop visual gate failed; verified responsive alternative')
         finally:browser.close()
-    render(a.family,assets,a.out)
+    selected.update(attempts=attempts,preferred=preferred)
+    render(a.family,assets,a.out,selected)
 if __name__=='__main__':main()
