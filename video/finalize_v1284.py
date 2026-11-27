@@ -23,6 +23,9 @@ def main(folder,source,timing,manifest,out):
     original=cv2.VideoCapture(str(source));w,h,fps,total=metadata(original)
     require((w,h,fps)==(1080,1920,30) and 900<=total<=3600,'source format')
     edges=[0]+[round((a['end']+b['start'])*15) for a,b in zip(scenes,scenes[1:])]+[total]
+    recorded=t.get('frame_boundaries',edges)
+    require(len(recorded)==11 and all(isinstance(v,int) for v in recorded) and recorded[0]==0 and recorded[-1]==total and all(abs(x-y)<=1 for x,y in zip(recorded,edges)),'recorded boundaries mismatch')
+    edges=recorded
     require(all(b>a for a,b in zip(edges,edges[1:])),'timing order')
     receipts=[]
     for i,(start,end) in enumerate(zip(edges,edges[1:])):
