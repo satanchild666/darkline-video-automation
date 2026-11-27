@@ -21,7 +21,8 @@ def decision(day,now,history,occupancy,preflight,complete,voice_topics):
     slot=slots.plan(day)[1]
     # Match the existing production schedule, not the earlier 13:00 review draft.
     slot=slots.Slot(slot.number,slot.kind,dt.datetime.combine(day,dt.time(13,17),BUDAPEST),slot.due_at)
-    state=slots.decision(slot,now,occupancy,True,True,True)
+    local=now.astimezone(BUDAPEST)
+    state='SKIP_OUTSIDE_WINDOW' if local.date()!=day or local>=slot.due_at-dt.timedelta(hours=1) else slots.decision(slot,now,occupancy,True,True,True)
     result={'date':day.isoformat(),'slot':slot.key,'slot_decision':state,'topic':None,'publication':False,'voice_calls':0,'review_only':True,'production_ready':False}
     require(budget.RESERVE_PER_SLOT*62<=budget.MONTHLY_LIMIT,'budget guard')
     if state!='PREPARE_VIDEO':return result
@@ -54,13 +55,15 @@ def selftest():
     du=dt.datetime.combine(day,dt.time(16),BUDAPEST).isoformat()
     assert decision(day,now,[],[{'key':x['slot'],'due_at':du}],avail,True,[])['slot_decision']=='SKIP_OCCUPIED'
     assert decision(day,now-dt.timedelta(minutes=1),[],[],avail,True,[])['slot_decision']=='SKIP_OUTSIDE_WINDOW'
+    assert decision(day,now.replace(hour=15,minute=7),[],[],avail,True,[])['slot_decision']=='SKIP_OUTSIDE_WINDOW'
+    assert decision(day+dt.timedelta(days=1),now,[],[],avail,True,[])['slot_decision']=='SKIP_OUTSIDE_WINDOW'
     for f in (lambda:decision(day,now,[],[],avail,False,[]),lambda:decision(day,now,[],[],{},True,[]),lambda:decision(day,now,[],[],{k:{'status_code':503,'body':{}} for k in avail},True,[])):
         try:f()
         except (ValueError,RuntimeError):pass
         else:raise AssertionError('unsafe preflight accepted')
     print('V1286_DAILY_PASS rotation, duplicate history, slot, missing voice fallback, uncertain history/preflight rejection, budget ceiling; no API calls')
 if __name__=='__main__':
-    a=argparse.ArgumentParser();a.add_argument('--selftest',action='store_true');a.add_argument('--topic');a.add_argument('--folder',type=Path);a.add_argument('--out',type=Path);x=a.parse_args()
+    a=argparse.ArgumentParser();a.add_argument('--selftest',action='store_true');a.add_argument('--topic');a.add_argument('--folder',type=Path);a.add_argument('--out',type=Path);a.add_argument('--source',type=Path);a.add_argument('--timing',type=Path);a.add_argument('--manifest',type=Path);x=a.parse_args()
     if x.selftest:selftest()
     else:
-        require(x.topic and x.folder and x.out,'explicit private review required');full_review(x.topic,x.folder,x.out)
+        require(x.topic and x.folder and x.out,'explicit private review required');full_review(x.topic,x.folder,x.out,x.source,x.timing,x.manifest)
