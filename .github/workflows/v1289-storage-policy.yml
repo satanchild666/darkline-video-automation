@@ -1,0 +1,31 @@
+name: Darkline V12.8.9 private storage policy regression
+on:
+  push:
+    branches: ['dev/v12.8.1-private-integration']
+    paths: ['video/private_storage_v1289.py','video/cloud_review_v1289.py','video/test_private_storage_v1289.py','.github/workflows/v1289-storage-policy.yml']
+permissions:
+  contents: read
+jobs:
+  checks:
+    if: github.ref == 'refs/heads/dev/v12.8.1-private-integration'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fonts-dejavu-core ffmpeg libegl1 libgl1
+          python -m pip install -q Pillow numpy playwright cryptography opencv-python-headless vtk
+      - name: Pinned storage code and safety gates (no private assets)
+        run: |
+          test "$(git hash-object video/private_storage_v1289.py)" = "8903edafeb7098cecbec0c873645d625803ee11f"
+          python -m py_compile video/cloud_review_v1289.py
+          python video/test_private_storage_v1289.py
+          python video/heygen_budget_v126.py
+          python video/selection_v1266.py
+          python video/marketing_daily_v1265.py --selftest
