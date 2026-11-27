@@ -1,0 +1,52 @@
+name: Darkline V12.8.1 isolated demo visual tests
+on:
+  push:
+    branches: ['dev/v12.8.1-private-integration']
+    paths: ['.github/workflows/v1281-private-demo-review.yml', 'video/action_device_v1281.py']
+permissions:
+  contents: read
+concurrency:
+  group: darkline-v1281-private-demo-review
+  cancel-in-progress: false
+jobs:
+  visual:
+    if: github.ref == 'refs/heads/dev/v12.8.1-private-integration'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        family: [auto, menu, salon, crm, web]
+    env:
+      OMP_NUM_THREADS: '2'
+      LP_NUM_THREADS: '2'
+      OPENBLAS_NUM_THREADS: '2'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install standard browser and renderer dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-dejavu-core libegl1 libgl1
+          python -m pip install -q Pillow numpy playwright cryptography opencv-python-headless vtk
+          python -m playwright install --with-deps chromium
+      - name: Check catalogue and cost protection offline
+        run: |
+          python -m py_compile video/integration_v1280.py video/action_device_v1281.py
+          python video/heygen_budget_v126.py
+          python video/selection_v1266.py
+      - name: Record actual demo and composite approved phone
+        run: python video/action_device_v1281.py ${{ matrix.family }} --out review
+      - name: Store demo-only review evidence (no voice or production data)
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: V1281-demo-${{ matrix.family }}
+          path: review/
+          retention-days: 3
+          if-no-files-found: error
