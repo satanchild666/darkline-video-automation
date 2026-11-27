@@ -32,7 +32,7 @@ def decision(day,now,history,occupancy,preflight,complete,voice_topics):
         return a['status_code'],a['body']
     t=sel.choose(history,day,check)
     if t is None:result['slot_decision']='NO_UNIQUE_TOPIC';return result
-    result.update(topic=t.key,voice_available=t.key in voice_topics,slot_decision='PREPARE_PRIVATE_REVIEW' if t.key in voice_topics else 'IMAGE_BEFORE_MUTATION',monthly_reservation_ceiling_usd=str(budget.RESERVE_PER_SLOT*62))
+    result.update(topic=t.key,voice_available=t.key in voice_topics,slot_decision='PREPARE_PRIVATE_REVIEW' if t.key in voice_topics else 'IMAGE_BEFORE_MUTATION',monthly_reservation_ceiling_micro_usd=budget.RESERVE_PER_SLOT*62,monthly_reservation_ceiling_usd=f'{budget.RESERVE_PER_SLOT*62/1000000:.2f}')
     return result
 def full_review(topic,folder,out,source=None,timing=None,manifest=None):
     # Explicit manual review only. Never converts an image-fallback decision
@@ -46,6 +46,7 @@ def selftest():
     day=dt.date(2026,11,27);now=dt.datetime.combine(day,dt.time(13,17),BUDAPEST)
     avail={k:{'status_code':200,'body':{'status':'V124_TOPIC_AVAILABLE','sideEffects':False}} for k in sel.FAMILY}
     x=decision(day,now,[],[],avail,True,[]);assert x['slot_decision']=='IMAGE_BEFORE_MUTATION' and x['topic'] in sel.FAMILY
+    assert x['monthly_reservation_ceiling_micro_usd']==930000 and x['monthly_reservation_ceiling_usd']=='0.93'
     y=decision(day,now,[],[],avail,True,[x['topic']]);assert y['slot_decision']=='PREPARE_PRIVATE_REVIEW'
     t=next(t for t in sel.catalogue.TOPICS if t.key==x['topic'])
     hist=[('prior',{'script':sel.dedup.script_text(sel.original.plan(t))})]
